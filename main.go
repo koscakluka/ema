@@ -1,21 +1,29 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/koscakluka/ema/pkg/speechtotext"
+	"github.com/koscakluka/ema/pkg/speechtotext/deepgram"
+
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/gordonklaus/portaudio"
 )
 
 type stdoutMsg string
+type speakingMsg bool
 
 var program *tea.Program
+
 var output strings.Builder
 var mutex sync.RWMutex
 
@@ -23,6 +31,7 @@ type model struct {
 	termWidth  int
 	termHeight int
 	ready      bool
+	speaking   bool
 
 	viewport        viewport.Model
 	automaticScroll bool
@@ -77,6 +86,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+	case speakingMsg:
+		m.speaking = bool(msg)
+
 	case stdoutMsg:
 		mutex.Lock()
 		output.WriteString(string(msg))
@@ -115,10 +127,16 @@ func (m model) View() string {
 
 	mainContent := mainStyle.Render(m.viewport.View())
 
-	sidebar := sidebarStyle.Render(fmt.Sprintf("%s: %v\n",
-		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Automatic Scroll"),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", m.automaticScroll)),
-	))
+	sidebar := sidebarStyle.Render(strings.Join([]string{
+		fmt.Sprintf("%s: %v",
+			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Automatic Scroll"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", m.automaticScroll)),
+		),
+		fmt.Sprintf("%s: %v",
+			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Speaking"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", m.speaking)),
+		)}, "\n"),
+	)
 
 	footer := lipgloss.NewStyle().
 		PaddingTop(1).
@@ -141,16 +159,66 @@ func main() {
 		tea.WithMouseCellMotion(),
 	)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	go func() {
 		time.Sleep(2 * time.Second) // Give the UI time to start
-		for i := range 1000 {
-			fmt.Printf("Log message %d: This is some output to test the application\n", i)
-			time.Sleep(100 * time.Millisecond)
-		}
+		listenForSpeech(ctx)
 	}()
 
 	if _, err := program.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func listenForSpeech(ctx context.Context) {
+	err := portaudio.Initialize()
+	if err != nil {
+		log.Fatalf("Failed to initialize PortAudio: %v", err)
+	}
+	defer portaudio.Terminate()
+
+	deepgramClient := deepgram.NewClient(context.TODO())
+	if err = deepgramClient.Transcribe(context.TODO(),
+		speechtotext.WithSpeechStartedCallback(func() { program.Send(speakingMsg(true)) }),
+		speechtotext.WithSpeechEndedCallback(func() { program.Send(speakingMsg(false)) }),
+		speechtotext.WithPartialTranscriptionCallback(func(transcript string) { fmt.Println(transcript) }),
+	); err != nil {
+		log.Fatalf("Failed to start transcribing: %v", err)
+	}
+	defer deepgramClient.Close()
+
+	deviceInfo, err := portaudio.DefaultInputDevice()
+	if err != nil {
+		log.Fatalf("Failed to get default input device: %v", err)
+	}
+	fmt.Printf("Using device: %s\n", deviceInfo.Name)
+	stream, err := portaudio.OpenDefaultStream(1, 0, 44000, 1024, func(in []int16) {
+		audioBuffer := convertToBytes(in)
+		if err := deepgramClient.SendAudio(audioBuffer); err != nil {
+			log.Fatalf("Failed to send audio: %v", err)
+		}
+	})
+	if err != nil {
+		log.Fatalf("Failed to open PortAudio stream: %v", err)
+	}
+	defer stream.Close()
+
+	fmt.Println("Starting microphone capture. Speak now...")
+	if err := stream.Start(); err != nil {
+		log.Fatalf("Failed to start PortAudio stream: %v", err)
+	}
+	fmt.Println("Microphone stream started")
+	<-ctx.Done()
+}
+
+func convertToBytes(audio []int16) []byte {
+	audioBytes := make([]byte, len(audio)*2)
+	for i, sample := range audio {
+		audioBytes[i*2] = byte(sample & 0xff)
+		audioBytes[i*2+1] = byte((sample >> 8) & 0xff)
+	}
+	return audioBytes
 }
