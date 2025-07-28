@@ -26,6 +26,7 @@ func (s *TranscriptionClient) Transcribe(ctx context.Context, opts ...speechtote
 		detectSpeechStart: options.SpeechStartedCallback != nil,
 		enhanceSpeechEndingDetection: options.TranscriptionCallback != nil ||
 			options.SpeechEndedCallback != nil,
+		interimResults: options.InterimTranscriptionCallback != nil,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to open websocket: %w", err)
@@ -40,6 +41,7 @@ func (s *TranscriptionClient) Transcribe(ctx context.Context, opts ...speechtote
 type connectionOptions struct {
 	detectSpeechStart            bool
 	enhanceSpeechEndingDetection bool
+	interimResults               bool
 }
 
 func connectWebsocket(options connectionOptions) (*websocket.Conn, error) {
@@ -58,6 +60,8 @@ func connectWebsocket(options connectionOptions) (*websocket.Conn, error) {
 	queryParams.Set("smart_format", "true")
 	if options.enhanceSpeechEndingDetection {
 		queryParams.Set("utterance_end_ms", "1000")
+		queryParams.Set("interim_results", "true")
+	} else if options.interimResults {
 		queryParams.Set("interim_results", "true")
 	}
 	queryParams.Set("endpointing", "300")
@@ -184,6 +188,18 @@ func (s *TranscriptionClient) processMessage(_ context.Context, msg []byte, opti
 				s.onSpeechEnded(options)
 			}
 		}
+		if !msgResp.IsFinal &&
+			(options.PartialInterimTranscriptionCallback != nil || options.InterimTranscriptionCallback != nil) {
+			if len(msgResp.Channel.Alternatives) > 0 {
+				transcript := strings.TrimSpace(msgResp.Channel.Alternatives[0].Transcript)
+				if options.PartialInterimTranscriptionCallback != nil {
+					options.PartialInterimTranscriptionCallback(transcript)
+				} else if options.InterimTranscriptionCallback != nil {
+					options.InterimTranscriptionCallback(s.accumulatedTranscript + " " + transcript)
+				}
+			}
+		}
+
 	case api.TypeUtteranceEndResponse:
 		var msgResp api.UtteranceEndResponse
 		if err := json.Unmarshal(msg, &msgResp); err != nil {

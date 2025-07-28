@@ -34,16 +34,19 @@ const (
 type stdoutMsg string
 type speakingMsg bool
 
+type interimTranscriptMsg string
+
 var program *tea.Program
 
 var output strings.Builder
 var mutex sync.RWMutex
 
 type model struct {
-	termWidth  int
-	termHeight int
-	ready      bool
-	speaking   bool
+	termWidth         int
+	termHeight        int
+	ready             bool
+	speaking          bool
+	interimTranscript string
 
 	viewport        viewport.Model
 	automaticScroll bool
@@ -78,7 +81,6 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	viewportWidth := m.termWidth - sidebarOuterWidth - viewportPadding*2
 	viewportHeight := m.termHeight - viewportPadding*2 - 3
 
 	switch msg := msg.(type) {
@@ -86,16 +88,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
 
-		viewportWidth = m.termWidth - sidebarOuterWidth - viewportPadding*2
 		viewportHeight = m.termHeight - viewportPadding*2 - 3
 		if !m.ready {
-			m.viewport = viewport.New(viewportWidth, viewportHeight)
+			m.viewport = viewport.New(m.viewportWidth(), viewportHeight)
 			m.ready = true
 		} else {
-			m.viewport.Width = viewportWidth
+			m.viewport.Width = m.viewportWidth()
 			m.viewport.Height = viewportHeight
 		}
-		m.viewport.SetContent(wordwrap.String(output.String(), viewportWidth-4))
+		m.viewport.SetContent(m.getContent())
 		return m, nil
 
 	case tea.KeyMsg:
@@ -104,13 +105,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+	case interimTranscriptMsg:
+		m.interimTranscript = string(msg)
+		m.viewport.SetContent(m.getContent())
+
 	case speakingMsg:
 		m.speaking = bool(msg)
 
 	case stdoutMsg:
 		mutex.Lock()
 		output.WriteString(string(msg))
-		m.viewport.SetContent(wordwrap.String(output.String(), viewportWidth-4))
+		m.viewport.SetContent(m.getContent())
 		mutex.Unlock()
 		if m.automaticScroll {
 			m.viewport.GotoBottom()
@@ -125,6 +130,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m model) viewportWidth() int {
+	return m.termWidth - sidebarOuterWidth - viewportPadding*2
+}
+
+func (m model) getContent() string {
+	output := strings.TrimSpace(output.String())
+	if m.interimTranscript != "" {
+		output += "\n" + strings.TrimSpace(m.interimTranscript)
+	}
+	return wordwrap.String(output, m.viewportWidth()-4)
 }
 
 func (m model) View() string {
@@ -205,8 +222,10 @@ func listenForSpeech(ctx context.Context) {
 	if err = deepgramClient.Transcribe(context.TODO(),
 		speechtotext.WithSpeechStartedCallback(func() { program.Send(speakingMsg(true)) }),
 		speechtotext.WithSpeechEndedCallback(func() { program.Send(speakingMsg(false)) }),
-		speechtotext.WithPartialTranscriptionCallback(func(transcript string) { fmt.Println(transcript) }),
+		speechtotext.WithInterimTranscriptionCallback(func(transcript string) { program.Send(interimTranscriptMsg(transcript)) }),
 		speechtotext.WithTranscriptionCallback(func(transcript string) {
+			program.Send(interimTranscriptMsg(""))
+			program.Send(stdoutMsg(transcript + "\n"))
 			client.Prompt(context.TODO(), transcript, func(data string) {
 				fmt.Print(data)
 			})

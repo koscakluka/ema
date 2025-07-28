@@ -1,10 +1,13 @@
 package speechtotext
 
 type TranscriptionOptions struct {
-	PartialTranscriptionCallback func(transcript string)
-	TranscriptionCallback        func(transcript string)
-	SpeechStartedCallback        func()
-	SpeechEndedCallback          func()
+	PartialInterimTranscriptionCallback func(transcript string)
+	InterimTranscriptionCallback        func(transcript string)
+	PartialTranscriptionCallback        func(transcript string)
+	TranscriptionCallback               func(transcript string)
+
+	SpeechStartedCallback func()
+	SpeechEndedCallback   func()
 }
 
 type TranscriptionOption func(*TranscriptionOptions)
@@ -30,5 +33,17 @@ func WithSpeechStartedCallback(callback func()) TranscriptionOption {
 func WithSpeechEndedCallback(callback func()) TranscriptionOption {
 	return func(o *TranscriptionOptions) {
 		o.SpeechEndedCallback = callback
+	}
+}
+
+func WithPartialInterimTranscriptionCallback(callback func(transcript string)) TranscriptionOption {
+	return func(o *TranscriptionOptions) {
+		o.PartialInterimTranscriptionCallback = callback
+	}
+}
+
+func WithInterimTranscriptionCallback(callback func(transcript string)) TranscriptionOption {
+	return func(o *TranscriptionOptions) {
+		o.InterimTranscriptionCallback = callback
 	}
 }
