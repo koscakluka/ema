@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+
 	"log"
 	"os"
 	"strings"
@@ -17,7 +18,17 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/gordonklaus/portaudio"
+	"github.com/muesli/reflow/wordwrap"
+)
+
+const (
+	sidebarWidth      = 33
+	sidebarPadding    = 1
+	sidebarOuterWidth = sidebarWidth + sidebarPadding*2
+
+	viewportPadding = 1
 )
 
 type stdoutMsg string
@@ -67,18 +78,24 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	viewportWidth := m.termWidth - sidebarOuterWidth - viewportPadding*2
+	viewportHeight := m.termHeight - viewportPadding*2 - 3
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
+
+		viewportWidth = m.termWidth - sidebarOuterWidth - viewportPadding*2
+		viewportHeight = m.termHeight - viewportPadding*2 - 3
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, msg.Height-5)
-			m.viewport.SetContent(output.String())
+			m.viewport = viewport.New(viewportWidth, viewportHeight)
 			m.ready = true
 		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height
+			m.viewport.Width = viewportWidth
+			m.viewport.Height = viewportHeight
 		}
+		m.viewport.SetContent(wordwrap.String(output.String(), viewportWidth-4))
 		return m, nil
 
 	case tea.KeyMsg:
@@ -93,7 +110,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stdoutMsg:
 		mutex.Lock()
 		output.WriteString(string(msg))
-		m.viewport.SetContent(output.String())
+		m.viewport.SetContent(wordwrap.String(output.String(), viewportWidth-4))
 		mutex.Unlock()
 		if m.automaticScroll {
 			m.viewport.GotoBottom()
@@ -117,13 +134,13 @@ func (m model) View() string {
 
 	mainStyle := lipgloss.NewStyle().
 		Padding(1).
-		Width(m.termWidth - 35).
+		Width(m.termWidth - sidebarOuterWidth).
 		Height(m.termHeight - 3)
 
 	sidebarStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		Padding(1).
-		Width(33).
+		Padding(sidebarPadding).
+		Width(sidebarWidth).
 		Height(m.termHeight - 2)
 
 	mainContent := mainStyle.Render(m.viewport.View())
@@ -136,7 +153,8 @@ func (m model) View() string {
 		fmt.Sprintf("%s: %v",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Speaking"),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", m.speaking)),
-		)}, "\n"),
+		),
+	}, "\n"),
 	)
 
 	footer := lipgloss.NewStyle().

@@ -9,6 +9,7 @@ require (
 	github.com/deepgram/deepgram-go-sdk v1.9.0
 	github.com/gordonklaus/portaudio v0.0.0-20230709114228-aafa478834f5
 	github.com/gorilla/websocket v1.5.3
+	github.com/muesli/reflow v0.3.0
 )
 
 require (
