@@ -35,9 +35,11 @@ type stdoutMsg string
 type speakingMsg bool
 
 type interimTranscriptMsg string
+type endRecordingMsg struct{}
 
 var program *tea.Program
 
+var isRecording bool
 var output strings.Builder
 var mutex sync.RWMutex
 
@@ -50,6 +52,8 @@ type model struct {
 
 	viewport        viewport.Model
 	automaticScroll bool
+
+	endRecordingTimer *time.Timer
 }
 
 func (m model) Init() tea.Cmd {
@@ -101,9 +105,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch msg.String() {
+		case " ":
+			isRecording = true
+			if m.endRecordingTimer != nil {
+				if !m.endRecordingTimer.Stop() {
+					select {
+					case <-m.endRecordingTimer.C:
+						return m, func() tea.Msg { return endRecordingMsg{} }
+					default:
+					}
+				}
+			}
+			m.endRecordingTimer = time.NewTimer(time.Millisecond * 100)
+
+			return m, func() tea.Msg {
+				<-m.endRecordingTimer.C
+				return endRecordingMsg{}
+			}
+
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
+
+	case endRecordingMsg:
+		isRecording = false
+		m.endRecordingTimer = nil
+		return m, nil
 
 	case interimTranscriptMsg:
 		m.interimTranscript = string(msg)
@@ -163,6 +190,10 @@ func (m model) View() string {
 	mainContent := mainStyle.Render(m.viewport.View())
 
 	sidebar := sidebarStyle.Render(strings.Join([]string{
+		fmt.Sprintf("%s: %v",
+			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Recording"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", isRecording)),
+		),
 		fmt.Sprintf("%s: %v",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Automatic Scroll"),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", m.automaticScroll)),
@@ -242,6 +273,10 @@ func listenForSpeech(ctx context.Context) {
 	}
 	fmt.Printf("Using device: %s\n", deviceInfo.Name)
 	stream, err := portaudio.OpenDefaultStream(1, 0, 44000, 1024, func(in []int16) {
+		if !isRecording {
+			return
+		}
+
 		audioBuffer := convertToBytes(in)
 		if err := deepgramClient.SendAudio(audioBuffer); err != nil {
 			log.Fatalf("Failed to send audio: %v", err)

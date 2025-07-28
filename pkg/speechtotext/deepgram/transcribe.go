@@ -13,6 +13,7 @@ import (
 
 	api "github.com/deepgram/deepgram-go-sdk/pkg/api/listen/v1/websocket/interfaces"
 	"github.com/gorilla/websocket"
+	"github.com/koscakluka/ema/internal/utils"
 	"github.com/koscakluka/ema/pkg/speechtotext"
 )
 
@@ -79,6 +80,20 @@ func connectWebsocket(options connectionOptions) (*websocket.Conn, error) {
 	return conn, err
 }
 
+func (s *TranscriptionClient) sendKeepAlive() {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+
+	if err := s.conn.WriteJSON(
+		struct {
+			Type string `json:"type"`
+		}{
+			Type: "KeepAlive",
+		}); err != nil {
+		log.Println("Failed to write to deepgram client", "error", err)
+	}
+}
+
 func (s *TranscriptionClient) SendAudio(audio []byte) error {
 	s.connMu.Lock()
 	defer s.connMu.Unlock()
@@ -118,6 +133,8 @@ func (s *TranscriptionClient) readAndProcessMessages(ctx context.Context, conn *
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
+	var lastSilenceTime *time.Time
+	var lastKeepAliveTime *time.Time
 	go func() {
 		silenceValue := byte(0)
 		chunk := make([]byte, 50*8)
@@ -129,7 +146,17 @@ func (s *TranscriptionClient) readAndProcessMessages(ctx context.Context, conn *
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if diff := time.Since(s.lastMsgTs); diff.Milliseconds() > 50 {
+				if lastSilenceTime != nil && time.Since(*lastSilenceTime).Milliseconds() >= 300 {
+					lastSilenceTime = nil
+					if lastKeepAliveTime == nil || time.Since(*lastKeepAliveTime).Seconds() >= 5 {
+						lastKeepAliveTime = utils.Ptr(time.Now())
+						s.sendKeepAlive()
+					}
+
+				} else if diff := time.Since(s.lastMsgTs); diff.Milliseconds() > 50 {
+					if lastSilenceTime == nil {
+						lastSilenceTime = utils.Ptr(time.Now())
+					}
 					if err := s.sendSilence(chunk); err != nil {
 						log.Println("Sending silence audio error", err)
 					}
