@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/koscakluka/ema/pkg/llms/groq"
 	"github.com/koscakluka/ema/pkg/speechtotext"
 	"github.com/koscakluka/ema/pkg/speechtotext/deepgram"
 
@@ -180,11 +181,19 @@ func listenForSpeech(ctx context.Context) {
 	}
 	defer portaudio.Terminate()
 
+	client := groq.NewClient()
+
 	deepgramClient := deepgram.NewClient(context.TODO())
 	if err = deepgramClient.Transcribe(context.TODO(),
 		speechtotext.WithSpeechStartedCallback(func() { program.Send(speakingMsg(true)) }),
 		speechtotext.WithSpeechEndedCallback(func() { program.Send(speakingMsg(false)) }),
 		speechtotext.WithPartialTranscriptionCallback(func(transcript string) { fmt.Println(transcript) }),
+		speechtotext.WithTranscriptionCallback(func(transcript string) {
+			client.Prompt(context.TODO(), transcript, func(data string) {
+				fmt.Print(data)
+			})
+			fmt.Println()
+		}),
 	); err != nil {
 		log.Fatalf("Failed to start transcribing: %v", err)
 	}
