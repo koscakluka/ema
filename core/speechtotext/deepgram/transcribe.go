@@ -13,8 +13,8 @@ import (
 
 	api "github.com/deepgram/deepgram-go-sdk/pkg/api/listen/v1/websocket/interfaces"
 	"github.com/gorilla/websocket"
+	"github.com/koscakluka/ema/core/speechtotext"
 	"github.com/koscakluka/ema/internal/utils"
-	"github.com/koscakluka/ema/pkg/speechtotext"
 )
 
 func (s *TranscriptionClient) Transcribe(ctx context.Context, opts ...speechtotext.TranscriptionOption) error {

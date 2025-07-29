@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koscakluka/ema/pkg/llms/groq"
-	"github.com/koscakluka/ema/pkg/speechtotext"
-	"github.com/koscakluka/ema/pkg/speechtotext/deepgram"
+	"github.com/koscakluka/ema/core/llms/groq"
+	"github.com/koscakluka/ema/core/speechtotext"
+	"github.com/koscakluka/ema/core/speechtotext/deepgram"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
