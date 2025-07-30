@@ -18,7 +18,7 @@ import (
 	"github.com/koscakluka/ema/internal/utils"
 )
 
-const sampleRate = 44100
+const sampleRate = 48000
 
 func (s *TranscriptionClient) Transcribe(ctx context.Context, opts ...speechtotext.TranscriptionOption) error {
 	options := &speechtotext.TranscriptionOptions{}

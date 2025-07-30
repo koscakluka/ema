@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 
@@ -13,7 +15,9 @@ import (
 
 	"github.com/koscakluka/ema/core/llms/groq"
 	"github.com/koscakluka/ema/core/speechtotext"
-	"github.com/koscakluka/ema/core/speechtotext/deepgram"
+	deepgrams2t "github.com/koscakluka/ema/core/speechtotext/deepgram"
+	"github.com/koscakluka/ema/core/texttospeech"
+	deepgramt2s "github.com/koscakluka/ema/core/texttospeech/deepgram"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -29,6 +33,8 @@ const (
 	sidebarOuterWidth = sidebarWidth + sidebarPadding*2
 
 	viewportPadding = 1
+
+	bufferSize = 128
 )
 
 type stdoutMsg string
@@ -229,10 +235,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go func() {
-		time.Sleep(2 * time.Second) // Give the UI time to start
-		listenForSpeech(ctx)
-	}()
+	go listenForSpeech(ctx)
 
 	if _, err := program.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
@@ -249,7 +252,62 @@ func listenForSpeech(ctx context.Context) {
 
 	client := groq.NewClient()
 
-	deepgramClient := deepgram.NewClient(context.TODO())
+	in := make([]int16, bufferSize)
+	out := make([]int16, bufferSize)
+	stream, err := portaudio.OpenDefaultStream(1, 1, 48000, bufferSize, in, out)
+	if err != nil {
+		log.Fatalf("Failed to open PortAudio stream: %v", err)
+	}
+	defer stream.Close()
+
+	voice := deepgramt2s.VoiceAuraAsteria
+	fmt.Println("Using voice", voice)
+	voiceInfo := deepgramt2s.GetVoiceInfo(voice)
+	fmt.Println("Gender:", voiceInfo.Age, voiceInfo.Gender)
+	fmt.Println("Language:", voiceInfo.Language)
+	fmt.Println("Characteristics:", voiceInfo.Characteristics)
+	fmt.Println("UseCases:", voiceInfo.UseCases)
+	deepgramSpeechClient, err := deepgramt2s.NewTextToSpeechClient(context.TODO(), voice)
+	if err != nil {
+		fmt.Printf("Failed to create deepgram speech client: %v", err)
+	}
+
+	leftoverAudio := make([]byte, bufferSize*2)
+
+	if err := deepgramSpeechClient.OpenStream(context.TODO(),
+		texttospeech.WithAudioCallback(func(audio []byte) {
+			bufferSize := bufferSize * 2
+
+			// PERF: This is just to test this, there is no reason we should
+			// kill performance by copying here
+			audio = append(leftoverAudio, audio...)
+			for i := range len(audio)/bufferSize + 1 {
+				if (i+1)*bufferSize > len(audio) {
+					leftoverAudio = make([]byte, len(audio)-i*bufferSize)
+					copy(leftoverAudio, audio[i*bufferSize:])
+					break
+				}
+
+				binary.Read(bytes.NewBuffer(audio[i*bufferSize:(i+1)*bufferSize]), binary.LittleEndian, out)
+				stream.Write()
+			}
+		}),
+		texttospeech.WithAudioEndedCallback(func(transcript string) {
+			bufferSize := bufferSize * 2
+			lastAudio := make([]byte, bufferSize)
+			for i := range bufferSize {
+				lastAudio[i] = 0
+			}
+			copy(lastAudio, leftoverAudio)
+			binary.Write(bytes.NewBuffer(lastAudio), binary.LittleEndian, out)
+			stream.Write()
+			return
+		}),
+	); err != nil {
+		fmt.Printf("Failed to open deepgram speech stream: %v", err)
+	}
+
+	deepgramClient := deepgrams2t.NewClient(context.TODO())
 	if err = deepgramClient.Transcribe(context.TODO(),
 		speechtotext.WithSpeechStartedCallback(func() { program.Send(speakingMsg(true)) }),
 		speechtotext.WithSpeechEndedCallback(func() { program.Send(speakingMsg(false)) }),
@@ -257,9 +315,19 @@ func listenForSpeech(ctx context.Context) {
 		speechtotext.WithTranscriptionCallback(func(transcript string) {
 			program.Send(interimTranscriptMsg(""))
 			program.Send(stdoutMsg(transcript + "\n"))
+			flushedOnFinal := false
 			client.Prompt(context.TODO(), transcript, func(data string) {
+				flushedOnFinal = false
 				fmt.Print(data)
+				if err := deepgramSpeechClient.SendText(data); err != nil {
+					log.Printf("Failed to send text to deepgram: %v", err)
+				}
 			})
+			if !flushedOnFinal {
+				if err := deepgramSpeechClient.FlushBuffer(); err != nil {
+					log.Printf("Failed to flush buffer: %v", err)
+				}
+			}
 			fmt.Println()
 		}),
 	); err != nil {
@@ -267,39 +335,27 @@ func listenForSpeech(ctx context.Context) {
 	}
 	defer deepgramClient.Close()
 
-	deviceInfo, err := portaudio.DefaultInputDevice()
-	if err != nil {
-		log.Fatalf("Failed to get default input device: %v", err)
-	}
-	fmt.Printf("Using device: %s\n", deviceInfo.Name)
-	stream, err := portaudio.OpenDefaultStream(1, 0, 44000, 1024, func(in []int16) {
-		if !isRecording {
-			return
-		}
-
-		audioBuffer := convertToBytes(in)
-		if err := deepgramClient.SendAudio(audioBuffer); err != nil {
-			log.Fatalf("Failed to send audio: %v", err)
-		}
-	})
-	if err != nil {
-		log.Fatalf("Failed to open PortAudio stream: %v", err)
-	}
-	defer stream.Close()
-
-	fmt.Println("Starting microphone capture. Speak now...")
 	if err := stream.Start(); err != nil {
 		log.Fatalf("Failed to start PortAudio stream: %v", err)
 	}
-	fmt.Println("Microphone stream started")
-	<-ctx.Done()
-}
+	fmt.Println("Starting microphone capture. Speak now...")
 
-func convertToBytes(audio []int16) []byte {
-	audioBytes := make([]byte, len(audio)*2)
-	for i, sample := range audio {
-		audioBytes[i*2] = byte(sample & 0xff)
-		audioBytes[i*2+1] = byte((sample >> 8) & 0xff)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			if err := stream.Read(); err != nil {
+				log.Printf("Failed to read from PortAudio stream: %v", err)
+			}
+			if isRecording {
+				audioBuffer := bytes.Buffer{}
+				binary.Write(&audioBuffer, binary.LittleEndian, in)
+				if err := deepgramClient.SendAudio(audioBuffer.Bytes()); err != nil {
+					log.Fatalf("Failed to send audio: %v", err)
+				}
+			}
+		}
 	}
-	return audioBytes
+
 }
