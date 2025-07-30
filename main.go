@@ -316,13 +316,15 @@ func listenForSpeech(ctx context.Context) {
 			program.Send(interimTranscriptMsg(""))
 			program.Send(stdoutMsg(transcript + "\n"))
 			flushedOnFinal := false
-			client.Prompt(context.TODO(), transcript, func(data string) {
-				flushedOnFinal = false
-				fmt.Print(data)
-				if err := deepgramSpeechClient.SendText(data); err != nil {
-					log.Printf("Failed to send text to deepgram: %v", err)
-				}
-			})
+			client.Prompt(context.TODO(), transcript,
+				groq.WithStream(
+					func(data string) {
+						flushedOnFinal = false
+						fmt.Print(data)
+						if err := deepgramSpeechClient.SendText(data); err != nil {
+							log.Printf("Failed to send text to deepgram: %v", err)
+						}
+					}))
 			if !flushedOnFinal {
 				if err := deepgramSpeechClient.FlushBuffer(); err != nil {
 					log.Printf("Failed to flush buffer: %v", err)
