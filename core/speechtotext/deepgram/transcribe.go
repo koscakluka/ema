@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/koscakluka/ema/core/speechtotext"
 	"github.com/koscakluka/ema/internal/utils"
 )
+
+const sampleRate = 44100
 
 func (s *TranscriptionClient) Transcribe(ctx context.Context, opts ...speechtotext.TranscriptionOption) error {
 	options := &speechtotext.TranscriptionOptions{}
@@ -54,7 +57,7 @@ func connectWebsocket(options connectionOptions) (*websocket.Conn, error) {
 	listenUrl, _ := url.Parse("wss://api.deepgram.com/v1/listen")
 	queryParams := listenUrl.Query()
 	queryParams.Set("encoding", "linear16")
-	queryParams.Set("sample_rate", "44100")
+	queryParams.Set("sample_rate", strconv.Itoa(sampleRate))
 	queryParams.Set("channels", "1")
 	queryParams.Set("model", "nova-3")
 	queryParams.Set("language", "en-US")
@@ -130,40 +133,10 @@ func (s *TranscriptionClient) StopStream() error {
 }
 
 func (s *TranscriptionClient) readAndProcessMessages(ctx context.Context, conn *websocket.Conn, options speechtotext.TranscriptionOptions) {
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
+	silenceCtx, silenceCancel := context.WithCancel(ctx)
+	defer silenceCancel()
 
-	var lastSilenceTime *time.Time
-	var lastKeepAliveTime *time.Time
-	go func() {
-		silenceValue := byte(0)
-		chunk := make([]byte, 50*8)
-		for i := range chunk {
-			chunk[i] = silenceValue
-		}
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if lastSilenceTime != nil && time.Since(*lastSilenceTime).Milliseconds() >= 300 {
-					lastSilenceTime = nil
-					if lastKeepAliveTime == nil || time.Since(*lastKeepAliveTime).Seconds() >= 5 {
-						lastKeepAliveTime = utils.Ptr(time.Now())
-						s.sendKeepAlive()
-					}
-
-				} else if diff := time.Since(s.lastMsgTs); diff.Milliseconds() > 50 {
-					if lastSilenceTime == nil {
-						lastSilenceTime = utils.Ptr(time.Now())
-					}
-					if err := s.sendSilence(chunk); err != nil {
-						log.Println("Sending silence audio error", err)
-					}
-				}
-			}
-		}
-	}()
+	go s.generateSilence(silenceCtx)
 
 	for {
 		msgType, msg, err := conn.ReadMessage()
@@ -263,5 +236,70 @@ func (s *TranscriptionClient) onSpeechEnded(options speechtotext.TranscriptionOp
 	}
 	if options.SpeechEndedCallback != nil {
 		options.SpeechEndedCallback()
+	}
+}
+
+func (s *TranscriptionClient) generateSilence(ctx context.Context) {
+	type silenceGeneratorState string
+	const (
+		silenceGeneratorStateWaiting   silenceGeneratorState = "waiting"
+		silenceGeneratorStateSilence   silenceGeneratorState = "silence"
+		silenceGeneratorStateKeepAlive silenceGeneratorState = "keepAlive"
+	)
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+
+	silenceValue := byte(0)
+	chunk := make([]byte, 50*sampleRate/1000)
+	for i := range chunk {
+		chunk[i] = silenceValue
+	}
+
+	var state = silenceGeneratorStateWaiting
+	var firstSilenceTime *time.Time
+	var lastKeepAliveTime *time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			switch state {
+			case silenceGeneratorStateWaiting:
+				if time.Since(s.lastMsgTs).Milliseconds() > 50 {
+					state = silenceGeneratorStateSilence
+					firstSilenceTime = utils.Ptr(time.Now())
+					continue
+				}
+
+			case silenceGeneratorStateSilence:
+				if time.Since(s.lastMsgTs).Milliseconds() < 50 {
+					state = silenceGeneratorStateWaiting
+					firstSilenceTime = nil
+					continue
+				}
+				if time.Since(*firstSilenceTime).Milliseconds() >= 1000 {
+					state = silenceGeneratorStateKeepAlive
+					lastKeepAliveTime = utils.Ptr(time.Now())
+					firstSilenceTime = nil
+					continue
+				}
+
+				if err := s.sendSilence(chunk); err != nil {
+					log.Println("Sending silence audio error", err)
+				}
+
+			case silenceGeneratorStateKeepAlive:
+				if time.Since(s.lastMsgTs).Milliseconds() < 50 {
+					state = silenceGeneratorStateSilence
+					continue
+				}
+
+				if time.Since(*lastKeepAliveTime).Seconds() >= 5 {
+					lastKeepAliveTime = utils.Ptr(time.Now())
+					s.sendKeepAlive()
+				}
+			}
+		}
 	}
 }
