@@ -45,7 +45,10 @@ type endRecordingMsg struct{}
 
 var program *tea.Program
 
-var isRecording bool
+var alwaysRecording = true
+var isRecording = false
+var isSpeaking = true
+
 var output strings.Builder
 var mutex sync.RWMutex
 
@@ -129,6 +132,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return endRecordingMsg{}
 			}
 
+		case "l":
+			alwaysRecording = !alwaysRecording
+
+		case "m":
+			isSpeaking = !isSpeaking
+
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
@@ -198,7 +207,7 @@ func (m model) View() string {
 	sidebar := sidebarStyle.Render(strings.Join([]string{
 		fmt.Sprintf("%s: %v",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Recording"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", isRecording)),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", isRecording || alwaysRecording)),
 		),
 		fmt.Sprintf("%s: %v",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Automatic Scroll"),
@@ -278,6 +287,10 @@ func listenForSpeech(ctx context.Context) {
 		texttospeech.WithAudioCallback(func(audio []byte) {
 			bufferSize := bufferSize * 2
 
+			if !isSpeaking {
+				return
+			}
+
 			// PERF: This is just to test this, there is no reason we should
 			// kill performance by copying here
 			audio = append(leftoverAudio, audio...)
@@ -293,6 +306,11 @@ func listenForSpeech(ctx context.Context) {
 			}
 		}),
 		texttospeech.WithAudioEndedCallback(func(transcript string) {
+			if !isSpeaking {
+				leftoverAudio = make([]byte, 0)
+				return
+			}
+
 			bufferSize := bufferSize * 2
 			lastAudio := make([]byte, bufferSize)
 			for i := range bufferSize {
@@ -350,7 +368,7 @@ func listenForSpeech(ctx context.Context) {
 			if err := stream.Read(); err != nil {
 				log.Printf("Failed to read from PortAudio stream: %v", err)
 			}
-			if isRecording {
+			if isRecording || alwaysRecording {
 				audioBuffer := bytes.Buffer{}
 				binary.Write(&audioBuffer, binary.LittleEndian, in)
 				if err := deepgramClient.SendAudio(audioBuffer.Bytes()); err != nil {
