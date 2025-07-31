@@ -1,29 +1,20 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 
-	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/koscakluka/ema/core/llms/groq"
-	"github.com/koscakluka/ema/core/speechtotext"
-	deepgrams2t "github.com/koscakluka/ema/core/speechtotext/deepgram"
-	"github.com/koscakluka/ema/core/texttospeech"
-	deepgramt2s "github.com/koscakluka/ema/core/texttospeech/deepgram"
+	"github.com/koscakluka/ema/core"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"github.com/gordonklaus/portaudio"
 	"github.com/muesli/reflow/wordwrap"
 )
 
@@ -33,8 +24,6 @@ const (
 	sidebarOuterWidth = sidebarWidth + sidebarPadding*2
 
 	viewportPadding = 1
-
-	bufferSize = 128
 )
 
 type stdoutMsg string
@@ -45,14 +34,12 @@ type endRecordingMsg struct{}
 
 var program *tea.Program
 
-var alwaysRecording = true
-var isRecording = false
-var isSpeaking = true
-
 var output strings.Builder
 var mutex sync.RWMutex
 
 type model struct {
+	orchestrator *orchestration.Orchestrator
+
 	termWidth         int
 	termHeight        int
 	ready             bool
@@ -115,7 +102,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case " ":
-			isRecording = true
+			m.orchestrator.IsRecording = true
 			if m.endRecordingTimer != nil {
 				if !m.endRecordingTimer.Stop() {
 					select {
@@ -133,17 +120,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "l":
-			alwaysRecording = !alwaysRecording
+			m.orchestrator.AlwaysRecording = !m.orchestrator.AlwaysRecording
 
 		case "m":
-			isSpeaking = !isSpeaking
+			m.orchestrator.IsSpeaking = !m.orchestrator.IsSpeaking
 
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
 
 	case endRecordingMsg:
-		isRecording = false
+		m.orchestrator.IsRecording = false
 		m.endRecordingTimer = nil
 		return m, nil
 
@@ -207,7 +194,7 @@ func (m model) View() string {
 	sidebar := sidebarStyle.Render(strings.Join([]string{
 		fmt.Sprintf("%s: %v",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Recording"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", isRecording || alwaysRecording)),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", m.orchestrator.IsRecording || m.orchestrator.AlwaysRecording)),
 		),
 		fmt.Sprintf("%s: %v",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Automatic Scroll"),
@@ -235,8 +222,13 @@ func (m model) View() string {
 }
 
 func main() {
+	orchestrator := orchestration.NewOrchestrator()
+
 	program = tea.NewProgram(
-		model{automaticScroll: true, ready: false},
+		model{
+			automaticScroll: true,
+			orchestrator:    orchestrator,
+		},
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
@@ -244,160 +236,20 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go listenForSpeech(ctx)
+	go orchestrator.ListenForSpeech(ctx, orchestration.Callbacks{
+		OnTranscription: func(transcript string) {
+			program.Send(stdoutMsg(transcript))
+		},
+		OnInterimTranscription: func(transcript string) {
+			program.Send(interimTranscriptMsg(transcript))
+		},
+		OnSpeakingStateChanged: func(isSpeaking bool) {
+			program.Send(speakingMsg(isSpeaking))
+		},
+	})
 
 	if _, err := program.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func listenForSpeech(ctx context.Context) {
-	err := portaudio.Initialize()
-	if err != nil {
-		log.Fatalf("Failed to initialize PortAudio: %v", err)
-	}
-	defer portaudio.Terminate()
-
-	client := groq.NewClient()
-
-	in := make([]int16, bufferSize)
-	out := make([]int16, bufferSize)
-	stream, err := portaudio.OpenDefaultStream(1, 1, 48000, bufferSize, in, out)
-	if err != nil {
-		log.Fatalf("Failed to open PortAudio stream: %v", err)
-	}
-	defer stream.Close()
-
-	voice := deepgramt2s.VoiceAuraAsteria
-	fmt.Println("Using voice", voice)
-	voiceInfo := deepgramt2s.GetVoiceInfo(voice)
-	fmt.Println("Gender:", voiceInfo.Age, voiceInfo.Gender)
-	fmt.Println("Language:", voiceInfo.Language)
-	fmt.Println("Characteristics:", voiceInfo.Characteristics)
-	fmt.Println("UseCases:", voiceInfo.UseCases)
-	deepgramSpeechClient, err := deepgramt2s.NewTextToSpeechClient(context.TODO(), voice)
-	if err != nil {
-		fmt.Printf("Failed to create deepgram speech client: %v", err)
-	}
-
-	leftoverAudio := make([]byte, bufferSize*2)
-
-	if err := deepgramSpeechClient.OpenStream(context.TODO(),
-		texttospeech.WithAudioCallback(func(audio []byte) {
-			bufferSize := bufferSize * 2
-
-			if !isSpeaking {
-				return
-			}
-
-			// PERF: This is just to test this, there is no reason we should
-			// kill performance by copying here
-			audio = append(leftoverAudio, audio...)
-			for i := range len(audio)/bufferSize + 1 {
-				if (i+1)*bufferSize > len(audio) {
-					leftoverAudio = make([]byte, len(audio)-i*bufferSize)
-					copy(leftoverAudio, audio[i*bufferSize:])
-					break
-				}
-
-				binary.Read(bytes.NewBuffer(audio[i*bufferSize:(i+1)*bufferSize]), binary.LittleEndian, out)
-				stream.Write()
-			}
-		}),
-		texttospeech.WithAudioEndedCallback(func(transcript string) {
-			if !isSpeaking {
-				leftoverAudio = make([]byte, 0)
-				return
-			}
-
-			bufferSize := bufferSize * 2
-			lastAudio := make([]byte, bufferSize)
-			for i := range bufferSize {
-				lastAudio[i] = 0
-			}
-			copy(lastAudio, leftoverAudio)
-			binary.Write(bytes.NewBuffer(lastAudio), binary.LittleEndian, out)
-			stream.Write()
-			return
-		}),
-	); err != nil {
-		fmt.Printf("Failed to open deepgram speech stream: %v", err)
-	}
-
-	deepgramClient := deepgrams2t.NewClient(context.TODO())
-	if err = deepgramClient.Transcribe(context.TODO(),
-		speechtotext.WithSpeechStartedCallback(func() { program.Send(speakingMsg(true)) }),
-		speechtotext.WithSpeechEndedCallback(func() { program.Send(speakingMsg(false)) }),
-		speechtotext.WithInterimTranscriptionCallback(func(transcript string) { program.Send(interimTranscriptMsg(transcript)) }),
-		speechtotext.WithTranscriptionCallback(func(transcript string) {
-			program.Send(interimTranscriptMsg(""))
-			program.Send(stdoutMsg(transcript + "\n"))
-			flushedOnFinal := false
-			client.Prompt(context.TODO(), transcript,
-				groq.WithTools(
-					groq.NewTool("recording_control", "Turn on or off sound recording, might be referred to as 'listening'",
-						map[string]groq.ParameterBase{
-							"is_recording": {Type: "boolean", Description: "Whether to record or not"},
-						},
-						func(parameters struct {
-							IsRecording bool `json:"is_recording"`
-						}) (string, error) {
-							alwaysRecording = parameters.IsRecording
-							return "Success", nil
-						}),
-					groq.NewTool("speaking_control", "Turn off agent's speaking ability. Might be referred to as 'muting'",
-						map[string]groq.ParameterBase{
-							"is_speaking": {Type: "boolean", Description: "Wheather to speak or not"},
-						},
-						func(parameters struct {
-							IsSpeaking bool `json:"is_speaking"`
-						}) (string, error) {
-							isSpeaking = parameters.IsSpeaking
-							return "Success", nil
-						}),
-				),
-				groq.WithStream(
-					func(data string) {
-						flushedOnFinal = false
-						fmt.Print(data)
-						if err := deepgramSpeechClient.SendText(data); err != nil {
-							log.Printf("Failed to send text to deepgram: %v", err)
-						}
-					}))
-			if !flushedOnFinal {
-				if err := deepgramSpeechClient.FlushBuffer(); err != nil {
-					log.Printf("Failed to flush buffer: %v", err)
-				}
-			}
-			fmt.Println()
-		}),
-	); err != nil {
-		log.Fatalf("Failed to start transcribing: %v", err)
-	}
-	defer deepgramClient.Close()
-
-	if err := stream.Start(); err != nil {
-		log.Fatalf("Failed to start PortAudio stream: %v", err)
-	}
-	fmt.Println("Starting microphone capture. Speak now...")
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			if err := stream.Read(); err != nil {
-				log.Printf("Failed to read from PortAudio stream: %v", err)
-			}
-			if isRecording || alwaysRecording {
-				audioBuffer := bytes.Buffer{}
-				binary.Write(&audioBuffer, binary.LittleEndian, in)
-				if err := deepgramClient.SendAudio(audioBuffer.Bytes()); err != nil {
-					log.Fatalf("Failed to send audio: %v", err)
-				}
-			}
-		}
-	}
-
 }
