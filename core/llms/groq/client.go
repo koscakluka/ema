@@ -195,7 +195,7 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 		for _, toolCall := range toolCalls {
 			for _, tool := range options.Tools {
 				if tool.Function.Name == toolCall.Function.Name {
-					resp, err := tool.Execute(ctx, toolCall.Function.Arguments)
+					resp, err := tool.Execute(toolCall.Function.Arguments)
 					if err != nil {
 						fmt.Println("Error executing tool:", err)
 					}

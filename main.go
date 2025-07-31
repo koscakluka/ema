@@ -335,6 +335,28 @@ func listenForSpeech(ctx context.Context) {
 			program.Send(stdoutMsg(transcript + "\n"))
 			flushedOnFinal := false
 			client.Prompt(context.TODO(), transcript,
+				groq.WithTools(
+					groq.NewTool("recording_control", "Turn on or off sound recording, might be referred to as 'listening'",
+						map[string]groq.ParameterBase{
+							"is_recording": {Type: "boolean", Description: "Whether to record or not"},
+						},
+						func(parameters struct {
+							IsRecording bool `json:"is_recording"`
+						}) (string, error) {
+							alwaysRecording = parameters.IsRecording
+							return "Success", nil
+						}),
+					groq.NewTool("speaking_control", "Turn off agent's speaking ability. Might be referred to as 'muting'",
+						map[string]groq.ParameterBase{
+							"is_speaking": {Type: "boolean", Description: "Wheather to speak or not"},
+						},
+						func(parameters struct {
+							IsSpeaking bool `json:"is_speaking"`
+						}) (string, error) {
+							isSpeaking = parameters.IsSpeaking
+							return "Success", nil
+						}),
+				),
 				groq.WithStream(
 					func(data string) {
 						flushedOnFinal = false
