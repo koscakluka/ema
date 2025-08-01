@@ -291,7 +291,7 @@ func (s *TranscriptionClient) generateSilence(ctx context.Context) {
 
 			case silenceGeneratorStateKeepAlive:
 				if time.Since(s.lastMsgTs).Milliseconds() < 50 {
-					state = silenceGeneratorStateSilence
+					state = silenceGeneratorStateWaiting
 					continue
 				}
 
