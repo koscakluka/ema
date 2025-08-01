@@ -36,6 +36,12 @@ to rn the app, use:
 make run
 ```
 
+To see logs, run:
+
+```bash
+tail -f tmp/log
+```
+
 ## Why Go?
 
 Primarily it is what I use at work. The benefits are, it is low level enough to

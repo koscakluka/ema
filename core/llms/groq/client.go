@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -142,7 +143,9 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			fmt.Println("Non-OK HTTP status:", resp.Status)
+			// TODO: Retry depending on status, send back a message to the user
+			// to indicate that something is going on
+			log.Println("Non-OK HTTP status:", resp.Status)
 		}
 
 		toolCalls := []ToolCall{}
@@ -162,7 +165,7 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 			var responseBody ResponseBody
 			err := json.Unmarshal([]byte(chunk), &responseBody)
 			if err != nil {
-				fmt.Println("Error unmarshalling JSON:", err)
+				log.Println("Error unmarshalling JSON:", err)
 				continue
 			}
 			if len(responseBody.Choices) == 0 {
@@ -180,7 +183,7 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 		}
 
 		if err := scanner.Err(); err != nil {
-			fmt.Println("Error reading streamed response:", err)
+			log.Println("Error reading streamed response:", err)
 		}
 
 		c.messages = append(c.messages, Message{
@@ -197,7 +200,7 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 				if tool.Function.Name == toolCall.Function.Name {
 					resp, err := tool.Execute(toolCall.Function.Arguments)
 					if err != nil {
-						fmt.Println("Error executing tool:", err)
+						log.Println("Error executing tool:", err)
 					}
 					c.messages = append(c.messages, Message{
 						ToolCallID: toolCall.ID,

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 
 	"log"
 
@@ -37,6 +36,7 @@ type Callbacks struct {
 	OnTranscription        func(transcript string)
 	OnInterimTranscription func(transcript string)
 	OnSpeakingStateChanged func(isSpeaking bool)
+	OnResponse             func(response string)
 }
 
 func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks) {
@@ -57,15 +57,9 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 	defer stream.Close()
 
 	voice := deepgramt2s.VoiceAuraAsteria
-	fmt.Println("Using voice", voice)
-	voiceInfo := deepgramt2s.GetVoiceInfo(voice)
-	fmt.Println("Gender:", voiceInfo.Age, voiceInfo.Gender)
-	fmt.Println("Language:", voiceInfo.Language)
-	fmt.Println("Characteristics:", voiceInfo.Characteristics)
-	fmt.Println("UseCases:", voiceInfo.UseCases)
 	deepgramSpeechClient, err := deepgramt2s.NewTextToSpeechClient(context.TODO(), voice)
 	if err != nil {
-		fmt.Printf("Failed to create deepgram speech client: %v", err)
+		log.Printf("Failed to create deepgram speech client: %v", err)
 	}
 
 	leftoverAudio := make([]byte, bufferSize*2)
@@ -109,7 +103,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			return
 		}),
 	); err != nil {
-		fmt.Printf("Failed to open deepgram speech stream: %v", err)
+		log.Printf("Failed to open deepgram speech stream: %v", err)
 	}
 
 	deepgramClient := deepgrams2t.NewClient(context.TODO())
@@ -163,7 +157,9 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 				groq.WithStream(
 					func(data string) {
 						flushedOnFinal = false
-						fmt.Print(data)
+						if callbacks.OnResponse != nil {
+							callbacks.OnResponse(data)
+						}
 						if err := deepgramSpeechClient.SendText(data); err != nil {
 							log.Printf("Failed to send text to deepgram: %v", err)
 						}
@@ -173,17 +169,19 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 					log.Printf("Failed to flush buffer: %v", err)
 				}
 			}
-			fmt.Println()
+			if callbacks.OnResponse != nil {
+				callbacks.OnResponse("\n")
+			}
 		}),
 	); err != nil {
 		log.Fatalf("Failed to start transcribing: %v", err)
 	}
 	defer deepgramClient.Close()
 
+	log.Println("Starting microphone capture. Speak now...")
 	if err := stream.Start(); err != nil {
 		log.Fatalf("Failed to start PortAudio stream: %v", err)
 	}
-	fmt.Println("Starting microphone capture. Speak now...")
 
 	for {
 		select {

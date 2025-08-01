@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log"
 
 	"os"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/koscakluka/ema/core"
+	"github.com/koscakluka/ema/internal/utils"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,11 +29,14 @@ const (
 	viewportPadding = 1
 )
 
-type stdoutMsg string
-type speakingMsg bool
-
-type interimTranscriptMsg string
+type speechDetectedMsg bool
 type endRecordingMsg struct{}
+
+type responseMsg struct {
+	text   string
+	buffer bool
+}
+type interimTranscriptMsg string
 
 var program *tea.Program
 
@@ -39,11 +45,13 @@ var mutex sync.RWMutex
 
 type model struct {
 	orchestrator *orchestration.Orchestrator
+	buffer       *bytes.Buffer
+	buffering    *bool
 
 	termWidth         int
 	termHeight        int
 	ready             bool
-	speaking          bool
+	speechDetected    bool
 	interimTranscript string
 
 	viewport        viewport.Model
@@ -53,29 +61,19 @@ type model struct {
 }
 
 func (m model) Init() tea.Cmd {
-	// Redirect output to the program
 	return tea.Cmd(func() tea.Msg {
-		var r *os.File
-		var err error
-		r, os.Stdout, err = os.Pipe()
-		if err != nil {
+		if err := os.MkdirAll("tmp", 0755); err != nil {
+			program.Quit()
 			return nil
 		}
-
-		go func() {
-			buffer := make([]byte, 1024)
-			for {
-				n, err := r.Read(buffer)
-				if err != nil && err != io.EOF {
-					break
-				}
-				for i := range n {
-					program.Send(stdoutMsg(string(buffer[i : i+1])))
-					time.Sleep(10 * time.Millisecond)
-				}
-			}
-		}()
-
+		f, err := os.OpenFile("tmp/log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			program.Quit()
+			return nil
+		}
+		os.Stdout = f
+		log.SetOutput(f)
+		fmt.Println("redirected stdout")
 		return nil
 	})
 }
@@ -138,16 +136,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.interimTranscript = string(msg)
 		m.viewport.SetContent(m.getContent())
 
-	case speakingMsg:
-		m.speaking = bool(msg)
+	case speechDetectedMsg:
+		m.speechDetected = bool(msg)
 
-	case stdoutMsg:
-		mutex.Lock()
-		output.WriteString(string(msg))
-		m.viewport.SetContent(m.getContent())
-		mutex.Unlock()
-		if m.automaticScroll {
-			m.viewport.GotoBottom()
+	case responseMsg:
+		if msg.buffer {
+			m.buffer.WriteString(string(msg.text))
+			if !*m.buffering {
+				*m.buffering = true
+				return m, tea.Cmd(func() tea.Msg {
+					defer func() {
+						*m.buffering = false
+					}()
+					for {
+						b, err := m.buffer.ReadByte()
+						time.Sleep(time.Millisecond * 10)
+						if err == io.EOF {
+							return nil
+						} else if err != nil {
+							// TODO: handle error
+							return nil
+						}
+						program.Send(responseMsg{text: string(b), buffer: false})
+					}
+				})
+			}
+		} else {
+			mutex.Lock()
+			output.WriteString(string(msg.text))
+			m.viewport.SetContent(m.getContent())
+			mutex.Unlock()
+			if m.automaticScroll {
+				m.viewport.GotoBottom()
+			}
 		}
 	}
 
@@ -191,21 +212,27 @@ func (m model) View() string {
 
 	mainContent := mainStyle.Render(m.viewport.View())
 
-	sidebar := sidebarStyle.Render(strings.Join([]string{
-		fmt.Sprintf("%s: %v",
-			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Recording"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", m.orchestrator.IsRecording || m.orchestrator.AlwaysRecording)),
-		),
-		fmt.Sprintf("%s: %v",
-			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Automatic Scroll"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", m.automaticScroll)),
-		),
-		fmt.Sprintf("%s: %v",
-			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Render("Speaking"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Render(fmt.Sprintf("%v", m.speaking)),
-		),
-	}, "\n"),
-	)
+	sidebarLabelStyle := lipgloss.NewStyle().
+		Bold(true).Foreground(lipgloss.Color("220"))
+	sidebarValueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
+
+	sidebarContent := []string{}
+	for _, line := range []struct {
+		label string
+		value string
+	}{
+		{label: "Recording", value: fmt.Sprintf("%v", m.orchestrator.IsRecording || m.orchestrator.AlwaysRecording)},
+		{label: "Automatic Scroll", value: fmt.Sprintf("%v", m.automaticScroll)},
+		{label: "Speaking", value: fmt.Sprintf("%v", m.speechDetected)},
+	} {
+		sidebarContent = append(sidebarContent,
+			fmt.Sprintf("%s: %v",
+				sidebarLabelStyle.Render(line.label),
+				sidebarValueStyle.Render(line.value),
+			),
+		)
+	}
+	sidebar := sidebarStyle.Render(strings.Join(sidebarContent, "\n"))
 
 	footer := lipgloss.NewStyle().
 		PaddingTop(1).
@@ -228,6 +255,8 @@ func main() {
 		model{
 			automaticScroll: true,
 			orchestrator:    orchestrator,
+			buffer:          bytes.NewBuffer([]byte{}),
+			buffering:       utils.Ptr(false),
 		},
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
@@ -238,18 +267,21 @@ func main() {
 
 	go orchestrator.ListenForSpeech(ctx, orchestration.Callbacks{
 		OnTranscription: func(transcript string) {
-			program.Send(stdoutMsg(transcript))
+			program.Send(responseMsg{text: transcript})
 		},
 		OnInterimTranscription: func(transcript string) {
 			program.Send(interimTranscriptMsg(transcript))
 		},
 		OnSpeakingStateChanged: func(isSpeaking bool) {
-			program.Send(speakingMsg(isSpeaking))
+			program.Send(speechDetectedMsg(isSpeaking))
+		},
+		OnResponse: func(response string) {
+			program.Send(responseMsg{text: response, buffer: true})
 		},
 	})
 
 	if _, err := program.Run(); err != nil {
-		fmt.Printf("Error: %v\n", err)
+		log.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 }
