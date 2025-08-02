@@ -141,7 +141,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 							IsRecording bool `json:"is_recording"`
 						}) (string, error) {
 							o.AlwaysRecording = parameters.IsRecording
-							return "Success", nil
+							return "Success. Respond with a very short phrase", nil
 						}),
 					groq.NewTool("speaking_control", "Turn off agent's speaking ability. Might be referred to as 'muting'",
 						map[string]groq.ParameterBase{
@@ -151,7 +151,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 							IsSpeaking bool `json:"is_speaking"`
 						}) (string, error) {
 							o.IsSpeaking = parameters.IsSpeaking
-							return "Success", nil
+							return "Success. Respond with a very short phrase", nil
 						}),
 				),
 				groq.WithStream(
