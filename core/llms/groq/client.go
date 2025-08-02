@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultModel  = "llama-3.3-70b-versatile"
-	defaultPrompt = "You are a helpful assistant, keep the conversation going and answer any questions to the best of your ability. Reply concisely and clearly unless asked to expand on something."
+	defaultPrompt = "You are a helpful assistant, keep the conversation going and answer any questions to the best of your ability. Reply concisely and clearly unless asked to expand on something. If told to not respond, respond with '...'."
 
 	url = "https://api.groq.com/openai/v1/chat/completions"
 
