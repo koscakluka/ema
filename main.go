@@ -27,6 +27,9 @@ const (
 	sidebarOuterWidth = sidebarWidth + sidebarPadding*2
 
 	viewportPadding = 1
+
+	speechBufferingDelay   = time.Millisecond * 50
+	noSpeechBufferingDelay = time.Millisecond * 10
 )
 
 type speechDetectedMsg bool
@@ -212,7 +215,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return nil
 					}
 					program.Send(bufferingTickMsg{})
-					time.Sleep(time.Millisecond * 10)
+					if m.orchestrator.IsSpeaking {
+						time.Sleep(speechBufferingDelay)
+					} else {
+						time.Sleep(noSpeechBufferingDelay)
+					}
 				}
 			})
 		}
