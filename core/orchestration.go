@@ -39,6 +39,7 @@ type Callbacks struct {
 	OnInterimTranscription func(transcript string)
 	OnSpeakingStateChanged func(isSpeaking bool)
 	OnResponse             func(response string)
+	OnResponseEnd          func()
 }
 
 func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks) {
@@ -130,8 +131,9 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 				callbacks.OnInterimTranscription("")
 			}
 			if callbacks.OnTranscription != nil {
-				callbacks.OnTranscription(transcript + "\n")
+				callbacks.OnTranscription(transcript)
 			}
+
 			o.transcripts <- transcript
 		}),
 	); err != nil {
@@ -180,8 +182,8 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			if err := deepgramSpeechClient.FlushBuffer(); err != nil {
 				log.Printf("Failed to flush buffer: %v", err)
 			}
-			if callbacks.OnResponse != nil {
-				callbacks.OnResponse("\n")
+			if callbacks.OnResponseEnd != nil {
+				callbacks.OnResponseEnd()
 			}
 		}
 	}()

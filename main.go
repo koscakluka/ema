@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
+	"slices"
 
 	"os"
 	"strings"
@@ -32,21 +32,33 @@ const (
 type speechDetectedMsg bool
 type endRecordingMsg struct{}
 
-type responseMsg struct {
-	text   string
-	buffer bool
-}
+type transcriptMsg string
+type responseMsg string
+type responseEndMsg struct{}
+type bufferingTickMsg struct{}
 type interimTranscriptMsg string
 
 var program *tea.Program
 
-var output strings.Builder
 var mutex sync.RWMutex
 
+type promptPair struct {
+	prompt   string
+	response *promptResponse
+}
+
+type promptResponse struct {
+	response       string
+	displayedUntil int
+	fullyReceived  bool
+}
+
 type model struct {
-	orchestrator *orchestration.Orchestrator
-	buffer       *bytes.Buffer
-	buffering    *bool
+	output            *strings.Builder
+	orchestrator      *orchestration.Orchestrator
+	buffer            *bytes.Buffer
+	buffering         *bool
+	receivingResponse *bool
 
 	termWidth         int
 	termHeight        int
@@ -58,6 +70,7 @@ type model struct {
 	automaticScroll bool
 
 	endRecordingTimer *time.Timer
+	promptsQueue      []promptPair // TODO: Consider using a ring-buffer or 2-way list if gc becomes an issue
 }
 
 func (m model) Init() tea.Cmd {
@@ -135,40 +148,104 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case interimTranscriptMsg:
 		m.interimTranscript = string(msg)
 		m.viewport.SetContent(m.getContent())
+		if m.automaticScroll {
+			m.viewport.GotoBottom()
+		}
 
 	case speechDetectedMsg:
 		m.speechDetected = bool(msg)
 
+	case bufferingTickMsg:
+		if len(m.promptsQueue) == 0 {
+			*m.buffering = false
+			return m, nil
+		}
+
+		if m.promptsQueue[0].response != nil {
+			if m.promptsQueue[0].response.displayedUntil < len(m.promptsQueue[0].response.response) {
+				m.promptsQueue[0].response.displayedUntil++
+			} else if m.promptsQueue[0].response.fullyReceived {
+				var pair promptPair
+				pair, m.promptsQueue = m.promptsQueue[0], m.promptsQueue[1:]
+
+				mutex.Lock()
+				m.output.WriteString(pair.prompt + "\n")
+				m.output.WriteString(pair.response.response + "\n\n")
+				mutex.Unlock()
+			}
+
+		}
+
+		m.viewport.SetContent(m.getContent())
+		if m.automaticScroll {
+			m.viewport.GotoBottom()
+		}
+
 	case responseMsg:
-		if msg.buffer {
-			m.buffer.WriteString(string(msg.text))
-			if !*m.buffering {
-				*m.buffering = true
-				return m, tea.Cmd(func() tea.Msg {
-					defer func() {
-						*m.buffering = false
-					}()
-					for {
-						b, err := m.buffer.ReadByte()
-						time.Sleep(time.Millisecond * 10)
-						if err == io.EOF {
-							return nil
-						} else if err != nil {
-							// TODO: handle error
-							return nil
-						}
-						program.Send(responseMsg{text: string(b), buffer: false})
-					}
-				})
+		firstIncompleteResponse := slices.IndexFunc(m.promptsQueue, func(p promptPair) bool {
+			if p.response == nil {
+				return true
+			}
+
+			return !p.response.fullyReceived
+		})
+
+		if firstIncompleteResponse == -1 {
+			return m, nil
+		}
+
+		if m.promptsQueue[firstIncompleteResponse].response == nil {
+			m.promptsQueue[firstIncompleteResponse].response = &promptResponse{
+				response:       string(msg),
+				displayedUntil: 0,
+				fullyReceived:  false,
 			}
 		} else {
-			mutex.Lock()
-			output.WriteString(string(msg.text))
-			m.viewport.SetContent(m.getContent())
-			mutex.Unlock()
-			if m.automaticScroll {
-				m.viewport.GotoBottom()
+			m.promptsQueue[firstIncompleteResponse].response.response += string(msg)
+		}
+
+		if !*m.buffering {
+			*m.buffering = true
+			return m, tea.Cmd(func() tea.Msg {
+				for {
+					if !*m.buffering {
+						return nil
+					}
+					program.Send(bufferingTickMsg{})
+					time.Sleep(time.Millisecond * 10)
+				}
+			})
+		}
+		return m, nil
+
+	case responseEndMsg:
+		firstIncompleteResponse := slices.IndexFunc(m.promptsQueue, func(p promptPair) bool {
+			if p.response == nil {
+				return true
 			}
+
+			return !p.response.fullyReceived
+		})
+		if firstIncompleteResponse == -1 {
+			return m, nil
+		}
+
+		if m.promptsQueue[firstIncompleteResponse].response == nil {
+			m.promptsQueue[firstIncompleteResponse].response = &promptResponse{
+				response:       "",
+				displayedUntil: 0,
+				fullyReceived:  true,
+			}
+		} else {
+			m.promptsQueue[firstIncompleteResponse].response.fullyReceived = true
+		}
+
+	case transcriptMsg:
+		m.promptsQueue = append(m.promptsQueue, promptPair{prompt: string(msg)})
+
+		m.viewport.SetContent(m.getContent())
+		if m.automaticScroll {
+			m.viewport.GotoBottom()
 		}
 	}
 
@@ -187,9 +264,21 @@ func (m model) viewportWidth() int {
 }
 
 func (m model) getContent() string {
-	output := strings.TrimSpace(output.String())
+	output := strings.TrimSpace(m.output.String())
+	if len(output) > 0 {
+		output += "\n\n"
+	}
+	for _, prompt := range m.promptsQueue {
+		output += prompt.prompt + "\n"
+		if prompt.response == nil || prompt.response.displayedUntil == 0 {
+			// TODO: Add color
+			output += "...\n\n"
+		} else {
+			output += prompt.response.response[:prompt.response.displayedUntil] + "\n\n"
+		}
+	}
 	if m.interimTranscript != "" {
-		output += "\n" + strings.TrimSpace(m.interimTranscript)
+		output += strings.TrimSpace(m.interimTranscript)
 	}
 	return wordwrap.String(output, m.viewportWidth()-4)
 }
@@ -253,10 +342,13 @@ func main() {
 
 	program = tea.NewProgram(
 		model{
-			automaticScroll: true,
-			orchestrator:    orchestrator,
-			buffer:          bytes.NewBuffer([]byte{}),
-			buffering:       utils.Ptr(false),
+			output:            &strings.Builder{},
+			automaticScroll:   true,
+			orchestrator:      orchestrator,
+			buffer:            bytes.NewBuffer([]byte{}),
+			buffering:         utils.Ptr(false),
+			receivingResponse: utils.Ptr(false),
+			promptsQueue:      []promptPair{},
 		},
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
@@ -267,7 +359,7 @@ func main() {
 
 	go orchestrator.ListenForSpeech(ctx, orchestration.Callbacks{
 		OnTranscription: func(transcript string) {
-			program.Send(responseMsg{text: transcript})
+			program.Send(transcriptMsg(transcript))
 		},
 		OnInterimTranscription: func(transcript string) {
 			program.Send(interimTranscriptMsg(transcript))
@@ -276,7 +368,10 @@ func main() {
 			program.Send(speechDetectedMsg(isSpeaking))
 		},
 		OnResponse: func(response string) {
-			program.Send(responseMsg{text: response, buffer: true})
+			program.Send(responseMsg(response))
+		},
+		OnResponseEnd: func() {
+			program.Send(responseEndMsg{})
 		},
 	})
 
