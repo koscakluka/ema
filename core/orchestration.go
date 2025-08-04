@@ -22,6 +22,7 @@ type Orchestrator struct {
 	AlwaysRecording bool
 	IsRecording     bool
 	IsSpeaking      bool
+	transcripts     chan string
 }
 
 func NewOrchestrator() *Orchestrator {
@@ -29,6 +30,7 @@ func NewOrchestrator() *Orchestrator {
 		AlwaysRecording: true,
 		IsRecording:     false,
 		IsSpeaking:      true,
+		transcripts:     make(chan string, 10), // TODO: Figure out good valiues for this
 	}
 }
 
@@ -130,7 +132,18 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			if callbacks.OnTranscription != nil {
 				callbacks.OnTranscription(transcript + "\n")
 			}
-			flushedOnFinal := false
+			o.transcripts <- transcript
+		}),
+	); err != nil {
+		log.Fatalf("Failed to start transcribing: %v", err)
+	}
+	defer deepgramClient.Close()
+
+	// TODO: Make sure that deepgramClient is closed and no longer transcribing
+	// before closing the channel
+	defer close(o.transcripts)
+	go func() {
+		for transcript := range o.transcripts {
 			client.Prompt(context.TODO(), transcript,
 				groq.WithTools(
 					groq.NewTool("recording_control", "Turn on or off sound recording, might be referred to as 'listening'",
@@ -156,7 +169,6 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 				),
 				groq.WithStream(
 					func(data string) {
-						flushedOnFinal = false
 						if callbacks.OnResponse != nil {
 							callbacks.OnResponse(data)
 						}
@@ -164,19 +176,15 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 							log.Printf("Failed to send text to deepgram: %v", err)
 						}
 					}))
-			if !flushedOnFinal {
-				if err := deepgramSpeechClient.FlushBuffer(); err != nil {
-					log.Printf("Failed to flush buffer: %v", err)
-				}
+
+			if err := deepgramSpeechClient.FlushBuffer(); err != nil {
+				log.Printf("Failed to flush buffer: %v", err)
 			}
 			if callbacks.OnResponse != nil {
 				callbacks.OnResponse("\n")
 			}
-		}),
-	); err != nil {
-		log.Fatalf("Failed to start transcribing: %v", err)
-	}
-	defer deepgramClient.Close()
+		}
+	}()
 
 	log.Println("Starting microphone capture. Speak now...")
 	if err := stream.Start(); err != nil {
