@@ -44,6 +44,7 @@ func connectWebsocket(voice deepgramVoice) (*websocket.Conn, error) {
 	urlValues.Set("encoding", "linear16")
 	urlValues.Set("sample_rate", strconv.Itoa(sampleRate))
 	urlValues.Set("model", string(voice))
+	urlValues.Set("container", "none")
 
 	conn, _, err := websocket.DefaultDialer.Dial(
 		(&url.URL{
