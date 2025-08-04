@@ -192,10 +192,12 @@ func (s *TranscriptionClient) processMessage(_ context.Context, msg []byte, opti
 			(options.PartialInterimTranscriptionCallback != nil || options.InterimTranscriptionCallback != nil) {
 			if len(msgResp.Channel.Alternatives) > 0 {
 				transcript := strings.TrimSpace(msgResp.Channel.Alternatives[0].Transcript)
-				if options.PartialInterimTranscriptionCallback != nil {
-					options.PartialInterimTranscriptionCallback(transcript)
-				} else if options.InterimTranscriptionCallback != nil {
-					options.InterimTranscriptionCallback(s.accumulatedTranscript + " " + transcript)
+				if len(transcript) > 0 {
+					if options.PartialInterimTranscriptionCallback != nil {
+						options.PartialInterimTranscriptionCallback(transcript)
+					} else if options.InterimTranscriptionCallback != nil {
+						options.InterimTranscriptionCallback(s.accumulatedTranscript + " " + transcript)
+					}
 				}
 			}
 		}
