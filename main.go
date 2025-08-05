@@ -40,6 +40,7 @@ type responseMsg string
 type responseEndMsg struct{}
 type bufferingTickMsg struct{}
 type interimTranscriptMsg string
+type cancelMsg struct{}
 
 var program *tea.Program
 
@@ -157,6 +158,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case speechDetectedMsg:
 		m.speechDetected = bool(msg)
+
+	case cancelMsg:
+		*m.buffering = false
+		var pair promptPair
+		pair, m.promptsQueue = m.promptsQueue[0], m.promptsQueue[1:]
+
+		mutex.Lock()
+		m.output.WriteString(pair.prompt + "\n")
+		if pair.response != nil && pair.response.displayedUntil > 0 {
+			m.output.WriteString(pair.response.response[:pair.response.displayedUntil] + "\n\n")
+		}
+		mutex.Unlock()
 
 	case bufferingTickMsg:
 		if len(m.promptsQueue) == 0 {
@@ -379,6 +392,9 @@ func main() {
 		},
 		OnResponseEnd: func() {
 			program.Send(responseEndMsg{})
+		},
+		OnCancellation: func() {
+			program.Send(cancelMsg{})
 		},
 	})
 

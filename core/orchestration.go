@@ -30,15 +30,44 @@ type Orchestrator struct {
 	transcripts  chan string
 	activePrompt *string
 	promptEnded  sync.WaitGroup
+	interruption bool
+	canceled     bool
+
+	tools []groq.Tool
 }
 
 func NewOrchestrator() *Orchestrator {
-	return &Orchestrator{
+	o := &Orchestrator{
 		AlwaysRecording: true,
 		IsRecording:     false,
 		IsSpeaking:      true,
 		transcripts:     make(chan string, 10), // TODO: Figure out good valiues for this
 	}
+
+	o.tools = []groq.Tool{
+		groq.NewTool("recording_control", "Turn on or off sound recording, might be referred to as 'listening'",
+			map[string]groq.ParameterBase{
+				"is_recording": {Type: "boolean", Description: "Whether to record or not"},
+			},
+			func(parameters struct {
+				IsRecording bool `json:"is_recording"`
+			}) (string, error) {
+				o.AlwaysRecording = parameters.IsRecording
+				return "Success. Respond with a very short phrase", nil
+			}),
+		groq.NewTool("speaking_control", "Turn off agent's speaking ability. Might be referred to as 'muting'",
+			map[string]groq.ParameterBase{
+				"is_speaking": {Type: "boolean", Description: "Wheather to speak or not"},
+			},
+			func(parameters struct {
+				IsSpeaking bool `json:"is_speaking"`
+			}) (string, error) {
+				o.IsSpeaking = parameters.IsSpeaking
+				return "Success. Respond with a very short phrase", nil
+			}),
+	}
+
+	return o
 }
 
 type Callbacks struct {
@@ -47,6 +76,7 @@ type Callbacks struct {
 	OnSpeakingStateChanged func(isSpeaking bool)
 	OnResponse             func(response string)
 	OnResponseEnd          func()
+	OnCancellation         func()
 }
 
 func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks) {
@@ -78,7 +108,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 		texttospeech.WithAudioCallback(func(audio []byte) {
 			bufferSize := bufferSize * 2
 
-			if !o.IsSpeaking {
+			if !o.IsSpeaking || o.canceled {
 				return
 			}
 
@@ -98,8 +128,9 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 		}),
 		texttospeech.WithAudioEndedCallback(func(transcript string) {
 			o.activePrompt = nil
+			o.canceled = false
 			o.promptEnded.Done()
-			if !o.IsSpeaking {
+			if !o.IsSpeaking || o.canceled {
 				leftoverAudio = make([]byte, 0)
 				return
 			}
@@ -131,6 +162,10 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			}
 		}),
 		speechtotext.WithInterimTranscriptionCallback(func(transcript string) {
+			if o.activePrompt != nil && !o.interruption {
+				o.interruption = true
+			}
+
 			if callbacks.OnInterimTranscription != nil {
 				callbacks.OnInterimTranscription(transcript)
 			}
@@ -139,11 +174,31 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			if callbacks.OnInterimTranscription != nil {
 				callbacks.OnInterimTranscription("")
 			}
-			if callbacks.OnTranscription != nil {
-				callbacks.OnTranscription(transcript)
+
+			if o.activePrompt != nil && !o.interruption {
+				o.interruption = true
+			}
+			passthrough := &transcript
+			if o.interruption {
+				interruption, err := o.classifyInterruption(transcript)
+				if err != nil {
+					// TODO: Retry?
+					log.Printf("Failed to classify interruption: %v", err)
+				} else {
+					passthrough, err = o.respondToInterruption(transcript, interruption, callbacks)
+					if err != nil {
+						log.Printf("Failed to respond to interruption: %v", err)
+					}
+				}
+				o.interruption = false
+			}
+			if passthrough != nil {
+				if callbacks.OnTranscription != nil {
+					callbacks.OnTranscription(transcript)
+				}
+				o.transcripts <- *passthrough
 			}
 
-			o.transcripts <- transcript
 		}),
 	); err != nil {
 		log.Fatalf("Failed to start transcribing: %v", err)
@@ -169,28 +224,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 
 			response, _ := client.Prompt(context.TODO(), transcript,
 				groq.WithMessages(messages...),
-				groq.WithTools(
-					groq.NewTool("recording_control", "Turn on or off sound recording, might be referred to as 'listening'",
-						map[string]groq.ParameterBase{
-							"is_recording": {Type: "boolean", Description: "Whether to record or not"},
-						},
-						func(parameters struct {
-							IsRecording bool `json:"is_recording"`
-						}) (string, error) {
-							o.AlwaysRecording = parameters.IsRecording
-							return "Success. Respond with a very short phrase", nil
-						}),
-					groq.NewTool("speaking_control", "Turn off agent's speaking ability. Might be referred to as 'muting'",
-						map[string]groq.ParameterBase{
-							"is_speaking": {Type: "boolean", Description: "Wheather to speak or not"},
-						},
-						func(parameters struct {
-							IsSpeaking bool `json:"is_speaking"`
-						}) (string, error) {
-							o.IsSpeaking = parameters.IsSpeaking
-							return "Success. Respond with a very short phrase", nil
-						}),
-				),
+				groq.WithTools(o.tools...),
 				groq.WithStream(
 					func(data string) {
 						if callbacks.OnResponse != nil {

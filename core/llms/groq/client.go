@@ -72,9 +72,10 @@ func NewClient() *Client {
 }
 
 type PromptOptions struct {
-	Messages []message
-	Stream   func(string)
-	Tools    []Tool
+	Messages        []message
+	Stream          func(string)
+	Tools           []Tool
+	ForcedToolsCall bool
 }
 
 type PromptOption func(*PromptOptions)
@@ -120,6 +121,13 @@ func WithTools(tools ...Tool) PromptOption {
 	}
 }
 
+func WithForcedTools(tools ...Tool) PromptOption {
+	return func(opts *PromptOptions) {
+		opts.Tools = tools
+		opts.ForcedToolsCall = true
+	}
+}
+
 func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption) (string, error) {
 	options := PromptOptions{
 		Messages: []message{
@@ -141,6 +149,10 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption
 	var toolChoice *string
 	if options.Tools != nil {
 		toolChoice = utils.Ptr("auto")
+
+		if options.ForcedToolsCall {
+			toolChoice = utils.Ptr("required")
+		}
 	}
 
 	for {
