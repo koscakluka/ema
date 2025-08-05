@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/internal/utils"
 )
 
@@ -24,14 +25,14 @@ const (
 	chunkPrefix = "data:"
 )
 
-type Message struct {
-	ToolCallID string      `json:"tool_call_id,omitempty"`
-	Role       messageRole `json:"role"`
-	Content    string      `json:"content"`
-	ToolCalls  []ToolCall  `json:"tool_calls,omitempty"`
+type message struct {
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Role       llms.MessageRole `json:"role"`
+	Content    string           `json:"content"`
+	ToolCalls  []toolCall       `json:"tool_calls,omitempty"`
 }
 
-type ToolCall struct {
+type toolCall struct {
 	ID       string `json:"id"`
 	Type     string `json:"type"`
 	Function struct {
@@ -40,26 +41,25 @@ type ToolCall struct {
 	} `json:"function"`
 }
 
-type RequestBody struct {
+type requestBody struct {
 	Model      string    `json:"model"`
-	Messages   []Message `json:"messages"`
+	Messages   []message `json:"messages"`
 	Stream     bool      `json:"stream"`
 	ToolChoice *string   `json:"tool_choice,omitempty"`
 	Tools      []Tool    `json:"tools,omitempty"`
 }
 
-type ResponseBody struct {
+type responseBody struct {
 	Choices []struct {
 		Delta struct {
 			Content   string     `json:"content"`
-			ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+			ToolCalls []toolCall `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 	} `json:"choices"`
 }
 
 type Client struct {
-	apiKey   string
-	messages []Message // TODO: make sure mesages are kept externally and the client is only responsible for communication
+	apiKey string
 }
 
 func NewClient() *Client {
@@ -68,20 +68,13 @@ func NewClient() *Client {
 		return nil
 	}
 
-	return &Client{
-		apiKey: apiKey,
-		messages: []Message{
-			{
-				Role:    roleSystem,
-				Content: defaultPrompt,
-			},
-		},
-	}
+	return &Client{apiKey: apiKey}
 }
 
 type PromptOptions struct {
-	Stream func(string)
-	Tools  []Tool
+	Messages []message
+	Stream   func(string)
+	Tools    []Tool
 }
 
 type PromptOption func(*PromptOptions)
@@ -91,21 +84,40 @@ func WithStream(stream func(string)) PromptOption {
 		opts.Stream = stream
 	}
 }
+
+func WithMessages(messages ...llms.Message) PromptOption {
+	return func(opts *PromptOptions) {
+		for _, msg := range messages {
+			opts.Messages = append(opts.Messages, message{
+				Role:    msg.Role,
+				Content: msg.Content,
+			})
+		}
+	}
+}
+
 func WithTools(tools ...Tool) PromptOption {
 	return func(opts *PromptOptions) {
 		opts.Tools = tools
 	}
 }
 
-func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOption) (string, error) {
-	options := PromptOptions{}
+func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption) (string, error) {
+	options := PromptOptions{
+		Messages: []message{
+			{
+				Role:    llms.MessageRoleSystem,
+				Content: defaultPrompt,
+			},
+		},
+	}
 	for _, opt := range opts {
 		opt(&options)
 	}
 
-	c.messages = append(c.messages, Message{
-		Role:    roleUser,
-		Content: message,
+	messages := append(options.Messages, message{
+		Role:    llms.MessageRoleUser,
+		Content: prompt,
 	})
 
 	var toolChoice *string
@@ -114,9 +126,9 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 	}
 
 	for {
-		reqBody := RequestBody{
+		reqBody := requestBody{
 			Model:      defaultModel,
-			Messages:   c.messages,
+			Messages:   messages,
 			Stream:     true,
 			Tools:      options.Tools,
 			ToolChoice: toolChoice,
@@ -148,7 +160,7 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 			log.Println("Non-OK HTTP status:", resp.Status)
 		}
 
-		toolCalls := []ToolCall{}
+		toolCalls := []toolCall{}
 		var response strings.Builder
 		scanner := bufio.NewScanner(resp.Body)
 		for scanner.Scan() {
@@ -162,7 +174,7 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 				break
 			}
 
-			var responseBody ResponseBody
+			var responseBody responseBody
 			err := json.Unmarshal([]byte(chunk), &responseBody)
 			if err != nil {
 				log.Println("Error unmarshalling JSON:", err)
@@ -186,8 +198,8 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 			log.Println("Error reading streamed response:", err)
 		}
 
-		c.messages = append(c.messages, Message{
-			Role:      roleAssistant,
+		messages = append(messages, message{
+			Role:      llms.MessageRoleAssistant,
 			Content:   response.String(),
 			ToolCalls: toolCalls,
 		})
@@ -202,9 +214,9 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 					if err != nil {
 						log.Println("Error executing tool:", err)
 					}
-					c.messages = append(c.messages, Message{
+					messages = append(messages, message{
 						ToolCallID: toolCall.ID,
-						Role:       roleTool,
+						Role:       llms.MessageRoleTool,
 						Content:    resp,
 					})
 				}
@@ -214,12 +226,3 @@ func (c *Client) Prompt(ctx context.Context, message string, opts ...PromptOptio
 
 	}
 }
-
-type messageRole string
-
-const (
-	roleSystem    messageRole = "system"
-	roleUser      messageRole = "user"
-	roleAssistant messageRole = "assistant"
-	roleTool      messageRole = "tool"
-)

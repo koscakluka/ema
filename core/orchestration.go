@@ -8,6 +8,7 @@ import (
 
 	"log"
 
+	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/core/llms/groq"
 	"github.com/koscakluka/ema/core/speechtotext"
 	deepgrams2t "github.com/koscakluka/ema/core/speechtotext/deepgram"
@@ -23,6 +24,8 @@ type Orchestrator struct {
 	AlwaysRecording bool
 	IsRecording     bool
 	IsSpeaking      bool
+
+	messages []llms.Message
 
 	transcripts  chan string
 	activePrompt *string
@@ -157,7 +160,15 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			}
 			o.activePrompt = &transcript
 			o.promptEnded.Add(1)
-			client.Prompt(context.TODO(), transcript,
+
+			messages := o.messages
+			o.messages = append(o.messages, llms.Message{
+				Role:    llms.MessageRoleUser,
+				Content: transcript,
+			})
+
+			response, _ := client.Prompt(context.TODO(), transcript,
+				groq.WithMessages(messages...),
 				groq.WithTools(
 					groq.NewTool("recording_control", "Turn on or off sound recording, might be referred to as 'listening'",
 						map[string]groq.ParameterBase{
@@ -190,6 +201,10 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 						}
 					}))
 
+			o.messages = append(o.messages, llms.Message{
+				Role:    llms.MessageRoleAssistant,
+				Content: response,
+			})
 			if err := deepgramSpeechClient.FlushBuffer(); err != nil {
 				log.Printf("Failed to flush buffer: %v", err)
 			}
