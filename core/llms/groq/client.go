@@ -85,6 +85,24 @@ func WithStream(stream func(string)) PromptOption {
 	}
 }
 
+func WithSystemPrompt(prompt string) PromptOption {
+	return func(opts *PromptOptions) {
+		if len(opts.Messages) == 0 {
+			opts.Messages = append(opts.Messages, message{
+				Role:    llms.MessageRoleSystem,
+				Content: prompt,
+			})
+		} else if opts.Messages[0].Role == llms.MessageRoleSystem {
+			opts.Messages[0].Content = prompt
+		} else {
+			opts.Messages = append([]message{{
+				Role:    llms.MessageRoleSystem,
+				Content: prompt,
+			}}, opts.Messages...)
+		}
+	}
+}
+
 func WithMessages(messages ...llms.Message) PromptOption {
 	return func(opts *PromptOptions) {
 		for _, msg := range messages {
