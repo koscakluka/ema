@@ -89,7 +89,7 @@ func (m model) Init() tea.Cmd {
 		}
 		os.Stdout = f
 		log.SetOutput(f)
-		fmt.Println("redirected stdout")
+		log.Println("Redirected stdout to log file")
 		return nil
 	})
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"sync"
 
 	"log"
 
@@ -22,7 +23,10 @@ type Orchestrator struct {
 	AlwaysRecording bool
 	IsRecording     bool
 	IsSpeaking      bool
-	transcripts     chan string
+
+	transcripts  chan string
+	activePrompt *string
+	promptEnded  sync.WaitGroup
 }
 
 func NewOrchestrator() *Orchestrator {
@@ -90,6 +94,8 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			}
 		}),
 		texttospeech.WithAudioEndedCallback(func(transcript string) {
+			o.activePrompt = nil
+			o.promptEnded.Done()
 			if !o.IsSpeaking {
 				leftoverAudio = make([]byte, 0)
 				return
@@ -146,6 +152,11 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 	defer close(o.transcripts)
 	go func() {
 		for transcript := range o.transcripts {
+			if o.activePrompt != nil {
+				o.promptEnded.Wait()
+			}
+			o.activePrompt = &transcript
+			o.promptEnded.Add(1)
 			client.Prompt(context.TODO(), transcript,
 				groq.WithTools(
 					groq.NewTool("recording_control", "Turn on or off sound recording, might be referred to as 'listening'",
