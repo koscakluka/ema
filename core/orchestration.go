@@ -31,6 +31,8 @@ type Orchestrator struct {
 
 	speechToTextClient SpeechToText
 	textToSpeechClient TextToSpeech
+	audioInput         AudioInput
+	audioOutput        AudioOutput
 }
 
 func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
@@ -71,17 +73,6 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 	return o
 }
 
-type Callbacks struct {
-	OnTranscription        func(transcript string)
-	OnInterimTranscription func(transcript string)
-	OnSpeakingStateChanged func(isSpeaking bool)
-	OnResponse             func(response string)
-	OnResponseEnd          func()
-	OnCancellation         func()
-	OnAudio                func(audio []byte)
-	OnAudioEnd             func(transcript string)
-}
-
 type OrchestratorOption func(*Orchestrator)
 
 func WithSpeechToTextClient(client SpeechToText) OrchestratorOption {
@@ -96,39 +87,51 @@ func WithTextToSpeechClient(client TextToSpeech) OrchestratorOption {
 	}
 }
 
+func WithAudioInput(client AudioInput) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.audioInput = client
+	}
+}
+
+func WithAudioOutput(client AudioOutput) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.audioOutput = client
+	}
+}
+
+type Callbacks struct {
+	OnTranscription        func(transcript string)
+	OnInterimTranscription func(transcript string)
+	OnSpeakingStateChanged func(isSpeaking bool)
+	OnResponse             func(response string)
+	OnResponseEnd          func()
+	OnCancellation         func()
+}
+
 func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks) {
 	client := groq.NewClient()
-	if o.speechToTextClient == nil {
-		if callbacks.OnAudio != nil {
-			log.Println("Warning: onAudio callback set but speech to text client is not set")
-		}
-		if callbacks.OnAudioEnd != nil {
-			log.Println("Warning: onAudioEnd callback set but speech to text client is not set")
-		}
-	}
 
 	if err := o.textToSpeechClient.OpenStream(context.TODO(),
 		texttospeech.WithAudioCallback(func(audio []byte) {
 			if !o.IsSpeaking || o.canceled {
+				log.Println("Clearing buffer")
+				o.audioOutput.ClearBuffer()
 				return
 			}
 
-			if callbacks.OnAudio != nil {
-				callbacks.OnAudio(audio)
-			}
+			o.audioOutput.SendAudio(audio)
 		}),
 		texttospeech.WithAudioEndedCallback(func(transcript string) {
 			o.activePrompt = nil
 			o.canceled = false
 			o.promptEnded.Done()
 			if !o.IsSpeaking || o.canceled {
+				log.Println("Clearing buffer")
+				o.audioOutput.ClearBuffer()
 				return
 			}
 
-			if callbacks.OnAudioEnd != nil {
-				callbacks.OnAudioEnd(transcript)
-			}
-
+			o.audioOutput.SendAudio([]byte{})
 		}),
 	); err != nil {
 		log.Printf("Failed to open deepgram speech stream: %v", err)
@@ -227,6 +230,16 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			}
 		}
 	}()
+
+	go func() {
+		if err := o.audioInput.Stream(ctx, func(audio []byte) {
+			if err := o.speechToTextClient.SendAudio(audio); err != nil {
+				log.Printf("Failed to send audio to speech to text client: %v", err)
+			}
+		}); err != nil {
+			log.Printf("Failed to start audio input streaming: %v", err)
+		}
+	}()
 }
 
 func (o *Orchestrator) Close() {
@@ -257,4 +270,14 @@ type TextToSpeech interface {
 	OpenStream(ctx context.Context, opts ...texttospeech.TextToSpeechOption) error
 	SendText(text string) error
 	FlushBuffer() error
+}
+
+type AudioInput interface {
+	Stream(ctx context.Context, onAudio func(audio []byte)) error
+	Close()
+}
+
+type AudioOutput interface {
+	SendAudio(audio []byte) error
+	ClearBuffer()
 }

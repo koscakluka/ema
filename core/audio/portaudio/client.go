@@ -40,7 +40,7 @@ func NewClient(bufferSize int) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) Stream(ctx context.Context, onAudio func(audio []byte)) {
+func (c *Client) Stream(ctx context.Context, onAudio func(audio []byte)) error {
 	log.Println("Starting microphone capture. Speak now...")
 	if err := c.stream.Start(); err != nil {
 		log.Fatalf("Failed to start PortAudio stream: %v", err)
@@ -49,7 +49,7 @@ func (c *Client) Stream(ctx context.Context, onAudio func(audio []byte)) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 			if err := c.stream.Read(); err != nil {
 				log.Printf("Failed to read from PortAudio stream: %v", err)
@@ -67,7 +67,7 @@ func (c *Client) Close() {
 	portaudio.Terminate()
 }
 
-func (c *Client) SendAudio(audio []byte) {
+func (c *Client) SendAudio(audio []byte) error {
 	bufferSize := c.bufferSize * 2
 
 	// PERF: This is just to test this, there is no reason we should
@@ -83,6 +83,8 @@ func (c *Client) SendAudio(audio []byte) {
 		binary.Read(bytes.NewBuffer(audio[i*bufferSize:(i+1)*bufferSize]), binary.LittleEndian, c.out)
 		c.stream.Write()
 	}
+
+	return nil
 }
 
 func (c *Client) ClearBuffer() {

@@ -376,9 +376,13 @@ func main() {
 	}
 	defer deepgramSpeechClient.Close(ctx)
 
+	audioClient, err := portaudio.NewClient(128)
+
 	orchestrator := orchestration.NewOrchestrator(
 		orchestration.WithSpeechToTextClient(deepgramClient),
 		orchestration.WithTextToSpeechClient(deepgramSpeechClient),
+		orchestration.WithAudioInput(audioClient),
+		orchestration.WithAudioOutput(audioClient),
 	)
 
 	program = tea.NewProgram(
@@ -394,8 +398,6 @@ func main() {
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
-
-	audioClient, err := portaudio.NewClient(bufferSize)
 
 	orchestrator.ListenForSpeech(ctx, orchestration.Callbacks{
 		OnTranscription: func(transcript string) {
@@ -417,18 +419,8 @@ func main() {
 			program.Send(cancelMsg{})
 			audioClient.ClearBuffer()
 		},
-		OnAudio: audioClient.SendAudio,
-		OnAudioEnd: func(transcript string) {
-			audioClient.SendAudio([]byte{})
-		},
 	})
 	defer orchestrator.Close()
-
-	go audioClient.Stream(ctx, func(audio []byte) {
-		if err := orchestrator.SendAudio(audio); err != nil {
-			log.Fatalf("Failed to send audio: %v", err)
-		}
-	})
 
 	if _, err := program.Run(); err != nil {
 		log.Printf("Error: %v\n", err)
