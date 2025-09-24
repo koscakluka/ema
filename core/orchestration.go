@@ -122,9 +122,11 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			o.audioOutput.SendAudio(audio)
 		}),
 		texttospeech.WithAudioEndedCallback(func(transcript string) {
-			o.activePrompt = nil
-			o.canceled = false
-			o.promptEnded.Done()
+			defer func() {
+				o.activePrompt = nil
+				o.canceled = false
+				o.promptEnded.Done()
+			}()
 			if !o.IsSpeaking || o.canceled {
 				log.Println("Clearing buffer")
 				o.audioOutput.ClearBuffer()
@@ -132,6 +134,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			}
 
 			o.audioOutput.SendAudio([]byte{})
+			o.audioOutput.AwaitMark()
 		}),
 	); err != nil {
 		log.Printf("Failed to open deepgram speech stream: %v", err)
@@ -284,5 +287,6 @@ type AudioInput interface {
 
 type AudioOutput interface {
 	SendAudio(audio []byte) error
+	AwaitMark() error
 	ClearBuffer()
 }

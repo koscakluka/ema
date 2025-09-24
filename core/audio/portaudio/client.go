@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"log"
+	"sync"
 
 	"github.com/gordonklaus/portaudio"
 )
@@ -16,6 +17,9 @@ type Client struct {
 
 	in  []int16
 	out []int16
+
+	awaiting bool
+	wait     sync.WaitGroup
 }
 
 func NewClient(bufferSize int) (*Client, error) {
@@ -84,9 +88,21 @@ func (c *Client) SendAudio(audio []byte) error {
 		c.stream.Write()
 	}
 
+	if c.awaiting && len(c.leftoverAudio) == 0 {
+		c.wait.Done()
+		c.awaiting = false
+	}
+
 	return nil
 }
 
 func (c *Client) ClearBuffer() {
 	c.leftoverAudio = make([]byte, 0)
+}
+
+func (c *Client) AwaitMark() error {
+	c.wait.Add(1)
+	c.awaiting = true
+	c.wait.Wait()
+	return nil
 }

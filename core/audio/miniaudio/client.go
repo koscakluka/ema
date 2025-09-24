@@ -17,7 +17,9 @@ type Client struct {
 
 	leftoverAudio []byte
 
-	mu sync.Mutex
+	awaiting bool
+	wait     sync.WaitGroup
+	mu       sync.Mutex
 }
 
 func NewClient() (*Client, error) {
@@ -68,6 +70,11 @@ func NewClient() (*Client, error) {
 					}
 				}
 				if cur == nil {
+					if client.awaiting {
+						client.wait.Done()
+						client.awaiting = false
+					}
+
 					for i := written; i < need; i++ {
 						pOutput[i] = 0
 					}
@@ -153,4 +160,11 @@ func (c *Client) ClearBuffer() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.leftoverAudio = make([]byte, 0)
+}
+
+func (c *Client) AwaitMark() error {
+	c.wait.Add(1)
+	c.awaiting = true
+	c.wait.Wait()
+	return nil
 }
