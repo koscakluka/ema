@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.6
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/deepgram/deepgram-go-sdk v1.9.0
+	github.com/gen2brain/malgo v0.11.24
 	github.com/gordonklaus/portaudio v0.0.0-20230709114228-aafa478834f5
 	github.com/gorilla/websocket v1.5.3
 	github.com/muesli/reflow v0.3.0
