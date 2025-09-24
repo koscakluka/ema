@@ -1,9 +1,7 @@
 package orchestration
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"sync"
 
 	"log"
@@ -11,11 +9,7 @@ import (
 	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/core/llms/groq"
 	"github.com/koscakluka/ema/core/speechtotext"
-	deepgrams2t "github.com/koscakluka/ema/core/speechtotext/deepgram"
 	"github.com/koscakluka/ema/core/texttospeech"
-	deepgramt2s "github.com/koscakluka/ema/core/texttospeech/deepgram"
-
-	"github.com/gordonklaus/portaudio"
 )
 
 const bufferSize = 128
@@ -34,14 +28,21 @@ type Orchestrator struct {
 	canceled     bool
 
 	tools []groq.Tool
+
+	speechToTextClient SpeechToText
+	textToSpeechClient TextToSpeech
 }
 
-func NewOrchestrator() *Orchestrator {
+func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 	o := &Orchestrator{
 		AlwaysRecording: true,
 		IsRecording:     false,
 		IsSpeaking:      true,
 		transcripts:     make(chan string, 10), // TODO: Figure out good valiues for this
+	}
+
+	for _, opt := range opts {
+		opt(o)
 	}
 
 	o.tools = []groq.Tool{
@@ -77,53 +78,43 @@ type Callbacks struct {
 	OnResponse             func(response string)
 	OnResponseEnd          func()
 	OnCancellation         func()
+	OnAudio                func(audio []byte)
+	OnAudioEnd             func(transcript string)
+}
+
+type OrchestratorOption func(*Orchestrator)
+
+func WithSpeechToTextClient(client SpeechToText) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.speechToTextClient = client
+	}
+}
+
+func WithTextToSpeechClient(client TextToSpeech) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.textToSpeechClient = client
+	}
 }
 
 func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks) {
-	err := portaudio.Initialize()
-	if err != nil {
-		log.Fatalf("Failed to initialize PortAudio: %v", err)
-	}
-	defer portaudio.Terminate()
-
 	client := groq.NewClient()
-
-	in := make([]int16, bufferSize)
-	out := make([]int16, bufferSize)
-	stream, err := portaudio.OpenDefaultStream(1, 1, 48000, bufferSize, in, out)
-	if err != nil {
-		log.Fatalf("Failed to open PortAudio stream: %v", err)
-	}
-	defer stream.Close()
-
-	voice := deepgramt2s.VoiceAuraAsteria
-	deepgramSpeechClient, err := deepgramt2s.NewTextToSpeechClient(context.TODO(), voice)
-	if err != nil {
-		log.Printf("Failed to create deepgram speech client: %v", err)
+	if o.speechToTextClient == nil {
+		if callbacks.OnAudio != nil {
+			log.Println("Warning: onAudio callback set but speech to text client is not set")
+		}
+		if callbacks.OnAudioEnd != nil {
+			log.Println("Warning: onAudioEnd callback set but speech to text client is not set")
+		}
 	}
 
-	leftoverAudio := make([]byte, bufferSize*2)
-
-	if err := deepgramSpeechClient.OpenStream(context.TODO(),
+	if err := o.textToSpeechClient.OpenStream(context.TODO(),
 		texttospeech.WithAudioCallback(func(audio []byte) {
-			bufferSize := bufferSize * 2
-
 			if !o.IsSpeaking || o.canceled {
 				return
 			}
 
-			// PERF: This is just to test this, there is no reason we should
-			// kill performance by copying here
-			audio = append(leftoverAudio, audio...)
-			for i := range len(audio)/bufferSize + 1 {
-				if (i+1)*bufferSize > len(audio) {
-					leftoverAudio = make([]byte, len(audio)-i*bufferSize)
-					copy(leftoverAudio, audio[i*bufferSize:])
-					break
-				}
-
-				binary.Read(bytes.NewBuffer(audio[i*bufferSize:(i+1)*bufferSize]), binary.LittleEndian, out)
-				stream.Write()
+			if callbacks.OnAudio != nil {
+				callbacks.OnAudio(audio)
 			}
 		}),
 		texttospeech.WithAudioEndedCallback(func(transcript string) {
@@ -131,26 +122,19 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			o.canceled = false
 			o.promptEnded.Done()
 			if !o.IsSpeaking || o.canceled {
-				leftoverAudio = make([]byte, 0)
 				return
 			}
 
-			bufferSize := bufferSize * 2
-			lastAudio := make([]byte, bufferSize)
-			for i := range bufferSize {
-				lastAudio[i] = 0
+			if callbacks.OnAudioEnd != nil {
+				callbacks.OnAudioEnd(transcript)
 			}
-			copy(lastAudio, leftoverAudio)
-			binary.Write(bytes.NewBuffer(lastAudio), binary.LittleEndian, out)
-			stream.Write()
-			return
+
 		}),
 	); err != nil {
 		log.Printf("Failed to open deepgram speech stream: %v", err)
 	}
 
-	deepgramClient := deepgrams2t.NewClient(context.TODO())
-	if err = deepgramClient.Transcribe(context.TODO(),
+	if err := o.speechToTextClient.Transcribe(context.TODO(),
 		speechtotext.WithSpeechStartedCallback(func() {
 			if callbacks.OnSpeakingStateChanged != nil {
 				callbacks.OnSpeakingStateChanged(true)
@@ -203,11 +187,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 	); err != nil {
 		log.Fatalf("Failed to start transcribing: %v", err)
 	}
-	defer deepgramClient.Close()
 
-	// TODO: Make sure that deepgramClient is closed and no longer transcribing
-	// before closing the channel
-	defer close(o.transcripts)
 	go func() {
 		for transcript := range o.transcripts {
 			if o.activePrompt != nil {
@@ -230,7 +210,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 						if callbacks.OnResponse != nil {
 							callbacks.OnResponse(data)
 						}
-						if err := deepgramSpeechClient.SendText(data); err != nil {
+						if err := o.textToSpeechClient.SendText(data); err != nil {
 							log.Printf("Failed to send text to deepgram: %v", err)
 						}
 					}))
@@ -239,7 +219,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 				Role:    llms.MessageRoleAssistant,
 				Content: response,
 			})
-			if err := deepgramSpeechClient.FlushBuffer(); err != nil {
+			if err := o.textToSpeechClient.FlushBuffer(); err != nil {
 				log.Printf("Failed to flush buffer: %v", err)
 			}
 			if callbacks.OnResponseEnd != nil {
@@ -247,28 +227,34 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			}
 		}
 	}()
+}
 
-	log.Println("Starting microphone capture. Speak now...")
-	if err := stream.Start(); err != nil {
-		log.Fatalf("Failed to start PortAudio stream: %v", err)
+func (o *Orchestrator) Close() {
+	// TODO: Make sure that deepgramClient is closed and no longer transcribing
+	// before closing the channel
+	close(o.transcripts)
+}
+
+func (o *Orchestrator) SendAudio(audio []byte) error {
+	if o.speechToTextClient == nil {
+		log.Println("Warning: SendAudio called but speech to text client is not set")
+		return nil
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			if err := stream.Read(); err != nil {
-				log.Printf("Failed to read from PortAudio stream: %v", err)
-			}
-			if o.IsRecording || o.AlwaysRecording {
-				audioBuffer := bytes.Buffer{}
-				binary.Write(&audioBuffer, binary.LittleEndian, in)
-				if err := deepgramClient.SendAudio(audioBuffer.Bytes()); err != nil {
-					log.Fatalf("Failed to send audio: %v", err)
-				}
-			}
-		}
+	if o.IsRecording || o.AlwaysRecording {
+		return o.speechToTextClient.SendAudio(audio)
 	}
 
+	return nil
+}
+
+type SpeechToText interface {
+	Transcribe(ctx context.Context, opts ...speechtotext.TranscriptionOption) error
+	SendAudio(audio []byte) error
+}
+
+type TextToSpeech interface {
+	OpenStream(ctx context.Context, opts ...texttospeech.TextToSpeechOption) error
+	SendText(text string) error
+	FlushBuffer() error
 }

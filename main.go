@@ -13,6 +13,9 @@ import (
 	"time"
 
 	"github.com/koscakluka/ema/core"
+	"github.com/koscakluka/ema/core/audio/portaudio"
+	deepgrams2t "github.com/koscakluka/ema/core/speechtotext/deepgram"
+	deepgramt2s "github.com/koscakluka/ema/core/texttospeech/deepgram"
 	"github.com/koscakluka/ema/internal/utils"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -30,6 +33,8 @@ const (
 
 	speechBufferingDelay   = time.Millisecond * 50
 	noSpeechBufferingDelay = time.Millisecond * 10
+
+	bufferSize = 128
 )
 
 type speechDetectedMsg bool
@@ -358,7 +363,23 @@ func (m model) View() string {
 }
 
 func main() {
-	orchestrator := orchestration.NewOrchestrator()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	deepgramClient := deepgrams2t.NewClient(ctx)
+	defer deepgramClient.Close()
+
+	voice := deepgramt2s.VoiceAuraAsteria
+	deepgramSpeechClient, err := deepgramt2s.NewTextToSpeechClient(context.TODO(), voice)
+	if err != nil {
+		log.Printf("Failed to create deepgram speech client: %v", err)
+	}
+	defer deepgramSpeechClient.Close(ctx)
+
+	orchestrator := orchestration.NewOrchestrator(
+		orchestration.WithSpeechToTextClient(deepgramClient),
+		orchestration.WithTextToSpeechClient(deepgramSpeechClient),
+	)
 
 	program = tea.NewProgram(
 		model{
@@ -374,10 +395,9 @@ func main() {
 		tea.WithMouseCellMotion(),
 	)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	audioClient, err := portaudio.NewClient(bufferSize)
 
-	go orchestrator.ListenForSpeech(ctx, orchestration.Callbacks{
+	orchestrator.ListenForSpeech(ctx, orchestration.Callbacks{
 		OnTranscription: func(transcript string) {
 			program.Send(transcriptMsg(transcript))
 		},
@@ -395,7 +415,19 @@ func main() {
 		},
 		OnCancellation: func() {
 			program.Send(cancelMsg{})
+			audioClient.ClearBuffer()
 		},
+		OnAudio: audioClient.SendAudio,
+		OnAudioEnd: func(transcript string) {
+			audioClient.SendAudio([]byte{})
+		},
+	})
+	defer orchestrator.Close()
+
+	go audioClient.Stream(ctx, func(audio []byte) {
+		if err := orchestrator.SendAudio(audio); err != nil {
+			log.Fatalf("Failed to send audio: %v", err)
+		}
 	})
 
 	if _, err := program.Run(); err != nil {
