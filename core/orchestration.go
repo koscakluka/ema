@@ -65,7 +65,7 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 			func(parameters struct {
 				IsSpeaking bool `json:"is_speaking"`
 			}) (string, error) {
-				o.IsSpeaking = parameters.IsSpeaking
+				o.SetSpeaking(parameters.IsSpeaking)
 				return "Success. Respond with a very short phrase", nil
 			}),
 	}
@@ -259,6 +259,11 @@ func (o *Orchestrator) SendAudio(audio []byte) error {
 	}
 
 	return nil
+}
+
+func (o *Orchestrator) SetSpeaking(isSpeaking bool) {
+	o.IsSpeaking = isSpeaking
+	o.audioOutput.ClearBuffer()
 }
 
 type SpeechToText interface {

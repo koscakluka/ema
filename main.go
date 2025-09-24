@@ -143,7 +143,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.orchestrator.AlwaysRecording = !m.orchestrator.AlwaysRecording
 
 		case "m":
-			m.orchestrator.IsSpeaking = !m.orchestrator.IsSpeaking
+			m.orchestrator.SetSpeaking(!m.orchestrator.IsSpeaking)
 
 		case "ctrl+c", "q":
 			return m, tea.Quit
