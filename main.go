@@ -383,6 +383,7 @@ func main() {
 		orchestration.WithTextToSpeechClient(deepgramSpeechClient),
 		orchestration.WithAudioInput(audioClient),
 		orchestration.WithAudioOutput(audioClient),
+		orchestration.WithOrchestrationTools(),
 	)
 
 	program = tea.NewProgram(

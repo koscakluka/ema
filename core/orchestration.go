@@ -28,7 +28,7 @@ type Orchestrator struct {
 	interruption bool
 	canceled     bool
 
-	tools []groq.Tool
+	tools []llms.Tool
 
 	speechToTextClient SpeechToText
 	textToSpeechClient TextToSpeech
@@ -46,29 +46,6 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 
 	for _, opt := range opts {
 		opt(o)
-	}
-
-	o.tools = []groq.Tool{
-		groq.NewTool("recording_control", "Turn on or off sound recording, might be referred to as 'listening'",
-			map[string]groq.ParameterBase{
-				"is_recording": {Type: "boolean", Description: "Whether to record or not"},
-			},
-			func(parameters struct {
-				IsRecording bool `json:"is_recording"`
-			}) (string, error) {
-				o.SetAlwaysRecording(parameters.IsRecording)
-				return "Success. Respond with a very short phrase", nil
-			}),
-		groq.NewTool("speaking_control", "Turn off agent's speaking ability. Might be referred to as 'muting'",
-			map[string]groq.ParameterBase{
-				"is_speaking": {Type: "boolean", Description: "Wheather to speak or not"},
-			},
-			func(parameters struct {
-				IsSpeaking bool `json:"is_speaking"`
-			}) (string, error) {
-				o.SetSpeaking(parameters.IsSpeaking)
-				return "Success. Respond with a very short phrase", nil
-			}),
 	}
 
 	return o
@@ -97,6 +74,18 @@ func WithAudioInput(client AudioInput) OrchestratorOption {
 func WithAudioOutput(client AudioOutput) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.audioOutput = client
+	}
+}
+
+func WithTools(tools ...llms.Tool) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.tools = tools
+	}
+}
+
+func WithOrchestrationTools() OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.tools = append(o.tools, orchestrationTools(o)...)
 	}
 }
 

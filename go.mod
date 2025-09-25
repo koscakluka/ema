@@ -10,6 +10,7 @@ require (
 	github.com/gen2brain/malgo v0.11.24
 	github.com/gordonklaus/portaudio v0.0.0-20230709114228-aafa478834f5
 	github.com/gorilla/websocket v1.5.3
+	github.com/jinzhu/copier v0.4.0
 	github.com/muesli/reflow v0.3.0
 )
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jinzhu/copier"
 	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/internal/utils"
 )
@@ -115,15 +116,15 @@ func WithMessages(messages ...llms.Message) PromptOption {
 	}
 }
 
-func WithTools(tools ...Tool) PromptOption {
+func WithTools(tools ...llms.Tool) PromptOption {
 	return func(opts *PromptOptions) {
-		opts.Tools = tools
+		copier.Copy(&opts.Tools, tools)
 	}
 }
 
-func WithForcedTools(tools ...Tool) PromptOption {
+func WithForcedTools(tools ...llms.Tool) PromptOption {
 	return func(opts *PromptOptions) {
-		opts.Tools = tools
+		copier.Copy(&opts.Tools, tools)
 		opts.ForcedToolsCall = true
 	}
 }
@@ -204,6 +205,7 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption
 				break
 			}
 
+			// log.Println("Chunk:", chunk)
 			var responseBody responseBody
 			err := json.Unmarshal([]byte(chunk), &responseBody)
 			if err != nil {
