@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/binary"
 	"log"
-	"sync"
 
 	"github.com/gordonklaus/portaudio"
 	"github.com/koscakluka/ema/core/audio"
@@ -22,9 +21,6 @@ type Client struct {
 
 	in  []int16
 	out []int16
-
-	awaiting bool
-	wait     sync.WaitGroup
 }
 
 func NewClient(bufferSize int) (*Client, error) {
@@ -93,11 +89,6 @@ func (c *Client) SendAudio(audio []byte) error {
 		c.stream.Write()
 	}
 
-	if c.awaiting && len(c.leftoverAudio) == 0 {
-		c.wait.Done()
-		c.awaiting = false
-	}
-
 	return nil
 }
 
@@ -106,9 +97,21 @@ func (c *Client) ClearBuffer() {
 }
 
 func (c *Client) AwaitMark() error {
-	c.wait.Add(1)
-	c.awaiting = true
-	c.wait.Wait()
+	bufferSize := c.bufferSize * 2
+
+	// PERF: This is just to test this, there is no reason we should
+	// kill performance by copying here
+	audio := c.leftoverAudio
+	for i := range len(audio)/bufferSize + 1 {
+		if (i+1)*bufferSize > len(audio) {
+			c.leftoverAudio = make([]byte, 0)
+			copy(c.leftoverAudio, audio[i*bufferSize:])
+			break
+		}
+
+		binary.Read(bytes.NewBuffer(audio[i*bufferSize:(i+1)*bufferSize]), binary.LittleEndian, c.out)
+		c.stream.Write()
+	}
 	return nil
 }
 
