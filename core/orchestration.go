@@ -116,7 +116,6 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 		texttospeech.WithEncodingInfo(o.audioOutput.EncodingInfo()),
 		texttospeech.WithAudioCallback(func(audio []byte) {
 			if !o.IsSpeaking || o.canceled {
-				log.Println("Clearing buffer")
 				o.audioOutput.ClearBuffer()
 				return
 			}
@@ -130,7 +129,6 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 				o.promptEnded.Done()
 			}()
 			if !o.IsSpeaking || o.canceled {
-				log.Println("Clearing buffer")
 				o.audioOutput.ClearBuffer()
 				return
 			}
