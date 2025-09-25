@@ -100,10 +100,14 @@ func (o *Orchestrator) classifyInterruption(prompt string) (interruptionType, er
 		groq.WithMessages(o.messages...),
 	)
 
+	if len(response) == 0 || len(response[0].Content) == 0 {
+		return "", fmt.Errorf("no response from interruption classifier")
+	}
+
 	var unmarshalledResponse struct {
 		Classification string `json:"classification"`
 	}
-	if err := json.Unmarshal([]byte(response), &unmarshalledResponse); err != nil {
+	if err := json.Unmarshal([]byte(response[len(response)-1].Content), &unmarshalledResponse); err != nil {
 		// TODO: Retry
 		log.Printf("Failed to unmarshal interruption classification response: %v", err)
 		return "", nil

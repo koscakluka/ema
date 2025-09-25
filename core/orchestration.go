@@ -207,10 +207,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 						}
 					}))
 
-			o.messages = append(o.messages, llms.Message{
-				Role:    llms.MessageRoleAssistant,
-				Content: response,
-			})
+			o.messages = append(o.messages, response...)
 			if err := o.textToSpeechClient.FlushBuffer(); err != nil {
 				log.Printf("Failed to flush buffer: %v", err)
 			}

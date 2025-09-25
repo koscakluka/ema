@@ -1,8 +1,19 @@
 package llms
 
 type Message struct {
-	Role    MessageRole
-	Content string
+	Role       MessageRole
+	Content    string
+	ToolCallID string
+	ToolCalls  []ToolCall
+}
+
+type ToolCall struct {
+	ID       string
+	Type     string
+	Function struct {
+		Name      string
+		Arguments string
+	}
 }
 
 type MessageRole string

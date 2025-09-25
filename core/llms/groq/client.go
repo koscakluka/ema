@@ -107,12 +107,9 @@ func WithSystemPrompt(prompt string) PromptOption {
 
 func WithMessages(messages ...llms.Message) PromptOption {
 	return func(opts *PromptOptions) {
-		for _, msg := range messages {
-			opts.Messages = append(opts.Messages, message{
-				Role:    msg.Role,
-				Content: msg.Content,
-			})
-		}
+		var msgs []message
+		copier.Copy(&msgs, messages)
+		opts.Messages = append(opts.Messages, msgs...)
 	}
 }
 
@@ -129,7 +126,7 @@ func WithForcedTools(tools ...llms.Tool) PromptOption {
 	}
 }
 
-func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption) (string, error) {
+func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption) ([]llms.Message, error) {
 	options := PromptOptions{
 		Messages: []message{
 			{
@@ -156,6 +153,8 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption
 		}
 	}
 
+	responses := []message{}
+
 	for {
 		reqBody := requestBody{
 			Model:      defaultModel,
@@ -167,12 +166,12 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption
 
 		requestBodyBytes, err := json.Marshal(reqBody)
 		if err != nil {
-			return "", fmt.Errorf("error marshalling JSON: %w", err)
+			return nil, fmt.Errorf("error marshalling JSON: %w", err)
 		}
 
 		req, err := http.NewRequest("POST", url, bytes.NewBuffer(requestBodyBytes))
 		if err != nil {
-			return "", fmt.Errorf("error creating HTTP request: %w", err)
+			return nil, fmt.Errorf("error creating HTTP request: %w", err)
 		}
 
 		req.Header.Set("Content-Type", "application/json")
@@ -181,7 +180,7 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption
 		client := &http.Client{}
 		resp, err := client.Do(req)
 		if err != nil {
-			return "", fmt.Errorf("error sending request: %w", err)
+			return nil, fmt.Errorf("error sending request: %w", err)
 		}
 		defer resp.Body.Close()
 
@@ -230,13 +229,17 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption
 			log.Println("Error reading streamed response:", err)
 		}
 
-		messages = append(messages, message{
+		msg := message{
 			Role:      llms.MessageRoleAssistant,
 			Content:   response.String(),
 			ToolCalls: toolCalls,
-		})
+		}
+		messages = append(messages, msg)
+		responses = append(responses, msg)
 		if len(toolCalls) == 0 {
-			return response.String(), nil
+			llmResponses := []llms.Message{}
+			copier.Copy(&llmResponses, messages)
+			return llmResponses, nil
 		}
 
 		for _, toolCall := range toolCalls {
@@ -246,11 +249,13 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption
 					if err != nil {
 						log.Println("Error executing tool:", err)
 					}
-					messages = append(messages, message{
+					msg := message{
 						ToolCallID: toolCall.ID,
 						Role:       llms.MessageRoleTool,
 						Content:    resp,
-					})
+					}
+					messages = append(messages, msg)
+					responses = append(responses, msg)
 				}
 			}
 
