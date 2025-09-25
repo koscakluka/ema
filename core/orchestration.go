@@ -56,7 +56,7 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 			func(parameters struct {
 				IsRecording bool `json:"is_recording"`
 			}) (string, error) {
-				o.AlwaysRecording = parameters.IsRecording
+				o.SetAlwaysRecording(parameters.IsRecording)
 				return "Success. Respond with a very short phrase", nil
 			}),
 		groq.NewTool("speaking_control", "Turn off agent's speaking ability. Might be referred to as 'muting'",
@@ -268,6 +268,10 @@ func (o *Orchestrator) SendAudio(audio []byte) error {
 func (o *Orchestrator) SetSpeaking(isSpeaking bool) {
 	o.IsSpeaking = isSpeaking
 	o.audioOutput.ClearBuffer()
+}
+
+func (o *Orchestrator) SetAlwaysRecording(isAlwaysRecording bool) {
+	o.AlwaysRecording = isAlwaysRecording
 }
 
 type SpeechToText interface {

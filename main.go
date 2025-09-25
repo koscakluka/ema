@@ -140,7 +140,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "l":
-			m.orchestrator.AlwaysRecording = !m.orchestrator.AlwaysRecording
+			m.orchestrator.SetAlwaysRecording(!m.orchestrator.AlwaysRecording)
 
 		case "m":
 			m.orchestrator.SetSpeaking(!m.orchestrator.IsSpeaking)
