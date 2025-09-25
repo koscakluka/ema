@@ -100,16 +100,12 @@ func WithAudioOutput(client AudioOutput) OrchestratorOption {
 	}
 }
 
-type Callbacks struct {
-	OnTranscription        func(transcript string)
-	OnInterimTranscription func(transcript string)
-	OnSpeakingStateChanged func(isSpeaking bool)
-	OnResponse             func(response string)
-	OnResponseEnd          func()
-	OnCancellation         func()
-}
+func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOption) {
+	options := OrchestrateOptions{}
+	for _, opt := range opts {
+		opt(&options)
+	}
 
-func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks) {
 	client := groq.NewClient()
 
 	if err := o.textToSpeechClient.OpenStream(context.TODO(),
@@ -143,13 +139,13 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 	if err := o.speechToTextClient.Transcribe(context.TODO(),
 		speechtotext.WithEncodingInfo(o.audioInput.EncodingInfo()),
 		speechtotext.WithSpeechStartedCallback(func() {
-			if callbacks.OnSpeakingStateChanged != nil {
-				callbacks.OnSpeakingStateChanged(true)
+			if options.onSpeakingStateChanged != nil {
+				options.onSpeakingStateChanged(true)
 			}
 		}),
 		speechtotext.WithSpeechEndedCallback(func() {
-			if callbacks.OnSpeakingStateChanged != nil {
-				callbacks.OnSpeakingStateChanged(false)
+			if options.onSpeakingStateChanged != nil {
+				options.onSpeakingStateChanged(false)
 			}
 		}),
 		speechtotext.WithInterimTranscriptionCallback(func(transcript string) {
@@ -157,13 +153,13 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 				o.interruption = true
 			}
 
-			if callbacks.OnInterimTranscription != nil {
-				callbacks.OnInterimTranscription(transcript)
+			if options.onInterimTranscription != nil {
+				options.onInterimTranscription(transcript)
 			}
 		}),
 		speechtotext.WithTranscriptionCallback(func(transcript string) {
-			if callbacks.OnInterimTranscription != nil {
-				callbacks.OnInterimTranscription("")
+			if options.onInterimTranscription != nil {
+				options.onInterimTranscription("")
 			}
 
 			if o.activePrompt != nil && !o.interruption {
@@ -176,7 +172,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 					// TODO: Retry?
 					log.Printf("Failed to classify interruption: %v", err)
 				} else {
-					passthrough, err = o.respondToInterruption(transcript, interruption, callbacks)
+					passthrough, err = o.respondToInterruption(transcript, interruption, options)
 					if err != nil {
 						log.Printf("Failed to respond to interruption: %v", err)
 					}
@@ -184,8 +180,8 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 				o.interruption = false
 			}
 			if passthrough != nil {
-				if callbacks.OnTranscription != nil {
-					callbacks.OnTranscription(transcript)
+				if options.onTranscription != nil {
+					options.onTranscription(transcript)
 				}
 				o.transcripts <- *passthrough
 			}
@@ -214,8 +210,8 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 				groq.WithTools(o.tools...),
 				groq.WithStream(
 					func(data string) {
-						if callbacks.OnResponse != nil {
-							callbacks.OnResponse(data)
+						if options.onResponse != nil {
+							options.onResponse(data)
 						}
 						if err := o.textToSpeechClient.SendText(data); err != nil {
 							log.Printf("Failed to send text to deepgram: %v", err)
@@ -229,8 +225,8 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			if err := o.textToSpeechClient.FlushBuffer(); err != nil {
 				log.Printf("Failed to flush buffer: %v", err)
 			}
-			if callbacks.OnResponseEnd != nil {
-				callbacks.OnResponseEnd()
+			if options.onResponseEnd != nil {
+				options.onResponseEnd()
 			}
 		}
 	}()
@@ -244,6 +240,53 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 			log.Printf("Failed to start audio input streaming: %v", err)
 		}
 	}()
+}
+
+type OrchestrateOptions struct {
+	onTranscription        func(transcript string)
+	onInterimTranscription func(transcript string)
+	onSpeakingStateChanged func(isSpeaking bool)
+	onResponse             func(response string)
+	onResponseEnd          func()
+	onCancellation         func()
+}
+
+type OrchestrateOption func(*OrchestrateOptions)
+
+func WithTranscriptionCallback(callback func(transcript string)) OrchestrateOption {
+	return func(o *OrchestrateOptions) {
+		o.onTranscription = callback
+	}
+}
+
+func WithInterimTranscriptionCallback(callback func(transcript string)) OrchestrateOption {
+	return func(o *OrchestrateOptions) {
+		o.onInterimTranscription = callback
+	}
+}
+
+func WithSpeakingStateChangedCallback(callback func(isSpeaking bool)) OrchestrateOption {
+	return func(o *OrchestrateOptions) {
+		o.onSpeakingStateChanged = callback
+	}
+}
+
+func WithResponseCallback(callback func(response string)) OrchestrateOption {
+	return func(o *OrchestrateOptions) {
+		o.onResponse = callback
+	}
+}
+
+func WithResponseEndCallback(callback func()) OrchestrateOption {
+	return func(o *OrchestrateOptions) {
+		o.onResponseEnd = callback
+	}
+}
+
+func WithCancellationCallback(callback func()) OrchestrateOption {
+	return func(o *OrchestrateOptions) {
+		o.onCancellation = callback
+	}
 }
 
 func (o *Orchestrator) Close() {

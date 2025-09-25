@@ -399,27 +399,27 @@ func main() {
 		tea.WithMouseCellMotion(),
 	)
 
-	orchestrator.ListenForSpeech(ctx, orchestration.Callbacks{
-		OnTranscription: func(transcript string) {
+	orchestrator.Orchestrate(ctx,
+		orchestration.WithTranscriptionCallback(func(transcript string) {
 			program.Send(transcriptMsg(transcript))
-		},
-		OnInterimTranscription: func(transcript string) {
+		}),
+		orchestration.WithInterimTranscriptionCallback(func(transcript string) {
 			program.Send(interimTranscriptMsg(transcript))
-		},
-		OnSpeakingStateChanged: func(isSpeaking bool) {
+		}),
+		orchestration.WithSpeakingStateChangedCallback(func(isSpeaking bool) {
 			program.Send(speechDetectedMsg(isSpeaking))
-		},
-		OnResponse: func(response string) {
+		}),
+		orchestration.WithResponseCallback(func(response string) {
 			program.Send(responseMsg(response))
-		},
-		OnResponseEnd: func() {
+		}),
+		orchestration.WithResponseEndCallback(func() {
 			program.Send(responseEndMsg{})
-		},
-		OnCancellation: func() {
+		}),
+		orchestration.WithCancellationCallback(func() {
 			program.Send(cancelMsg{})
 			audioClient.ClearBuffer()
-		},
-	})
+		}),
+	)
 	defer orchestrator.Close()
 
 	if _, err := program.Run(); err != nil {
