@@ -1,5 +1,7 @@
 package speechtotext
 
+import "github.com/koscakluka/ema/core/audio"
+
 type TranscriptionOptions struct {
 	PartialInterimTranscriptionCallback func(transcript string)
 	InterimTranscriptionCallback        func(transcript string)
@@ -8,6 +10,8 @@ type TranscriptionOptions struct {
 
 	SpeechStartedCallback func()
 	SpeechEndedCallback   func()
+
+	EncodingInfo audio.EncodingInfo
 }
 
 type TranscriptionOption func(*TranscriptionOptions)
@@ -45,5 +49,16 @@ func WithPartialInterimTranscriptionCallback(callback func(transcript string)) T
 func WithInterimTranscriptionCallback(callback func(transcript string)) TranscriptionOption {
 	return func(o *TranscriptionOptions) {
 		o.InterimTranscriptionCallback = callback
+	}
+}
+
+func WithEncodingInfo(encodingInfo audio.EncodingInfo) TranscriptionOption {
+	return func(o *TranscriptionOptions) {
+		if encodingInfo.SampleRate == 0 || encodingInfo.Encoding == "" {
+			// TODO: Issue warning
+			return
+		}
+
+		o.EncodingInfo = encodingInfo
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"log"
 
+	"github.com/koscakluka/ema/core/audio"
 	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/core/llms/groq"
 	"github.com/koscakluka/ema/core/speechtotext"
@@ -112,6 +113,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 	client := groq.NewClient()
 
 	if err := o.textToSpeechClient.OpenStream(context.TODO(),
+		texttospeech.WithEncodingInfo(o.audioOutput.EncodingInfo()),
 		texttospeech.WithAudioCallback(func(audio []byte) {
 			if !o.IsSpeaking || o.canceled {
 				log.Println("Clearing buffer")
@@ -141,6 +143,7 @@ func (o *Orchestrator) ListenForSpeech(ctx context.Context, callbacks Callbacks)
 	}
 
 	if err := o.speechToTextClient.Transcribe(context.TODO(),
+		speechtotext.WithEncodingInfo(o.audioInput.EncodingInfo()),
 		speechtotext.WithSpeechStartedCallback(func() {
 			if callbacks.OnSpeakingStateChanged != nil {
 				callbacks.OnSpeakingStateChanged(true)
@@ -281,11 +284,13 @@ type TextToSpeech interface {
 }
 
 type AudioInput interface {
+	EncodingInfo() audio.EncodingInfo
 	Stream(ctx context.Context, onAudio func(audio []byte)) error
 	Close()
 }
 
 type AudioOutput interface {
+	EncodingInfo() audio.EncodingInfo
 	SendAudio(audio []byte) error
 	AwaitMark() error
 	ClearBuffer()

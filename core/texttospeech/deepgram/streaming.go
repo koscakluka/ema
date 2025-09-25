@@ -11,18 +11,27 @@ import (
 	"strconv"
 
 	"github.com/gorilla/websocket"
+	"github.com/koscakluka/ema/core/audio"
 	"github.com/koscakluka/ema/core/texttospeech"
 )
 
-const sampleRate = 48000
+const (
+	defaultSampleRate = 48000
+	defaultEncoding   = "linear16"
+)
 
 func (c *TextToSpeechClient) OpenStream(ctx context.Context, opts ...texttospeech.TextToSpeechOption) error {
-	options := texttospeech.TextToSpeechOptions{}
+	options := texttospeech.TextToSpeechOptions{
+		EncodingInfo: audio.EncodingInfo{
+			SampleRate: defaultSampleRate,
+			Encoding:   defaultEncoding,
+		},
+	}
 	for _, opt := range opts {
 		opt(&options)
 	}
 
-	conn, err := connectWebsocket(c.voice)
+	conn, err := connectWebsocket(c.voice, options.EncodingInfo)
 	if err != nil {
 		return fmt.Errorf("failed to open websocket: %w", err)
 	}
@@ -34,15 +43,15 @@ func (c *TextToSpeechClient) OpenStream(ctx context.Context, opts ...texttospeec
 	return nil
 }
 
-func connectWebsocket(voice deepgramVoice) (*websocket.Conn, error) {
+func connectWebsocket(voice deepgramVoice, encodingInfo audio.EncodingInfo) (*websocket.Conn, error) {
 	apiKey, ok := os.LookupEnv("DEEPGRAM_API_KEY")
 	if !ok {
 		return nil, fmt.Errorf("deepgram api key not found")
 	}
 
 	urlValues := url.Values{}
-	urlValues.Set("encoding", "linear16")
-	urlValues.Set("sample_rate", strconv.Itoa(sampleRate))
+	urlValues.Set("encoding", encodingInfo.Encoding)
+	urlValues.Set("sample_rate", strconv.Itoa(encodingInfo.SampleRate))
 	urlValues.Set("model", string(voice))
 	urlValues.Set("container", "none")
 

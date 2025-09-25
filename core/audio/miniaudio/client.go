@@ -7,7 +7,10 @@ import (
 	"sync"
 
 	"github.com/gen2brain/malgo"
+	"github.com/koscakluka/ema/core/audio"
 )
+
+const sampleRate = 48000
 
 type Client struct {
 	audioContext *malgo.AllocatedContext
@@ -36,7 +39,7 @@ func NewClient() (*Client, error) {
 		audioContext: audioCtx,
 	}
 
-	sampleRate := uint32(48000)
+	sampleRate := uint32(sampleRate)
 	channels := 1
 	format := malgo.FormatS16
 	bytesPerFrame := malgo.SampleSizeInBytes(format) * channels
@@ -100,7 +103,7 @@ func (c *Client) Stream(ctx context.Context, onAudio func(audio []byte)) error {
 		log.Fatalf("Start playback failed: %v", err)
 	}
 
-	sampleRate := uint32(48000)
+	sampleRate := uint32(sampleRate)
 	channels := 1
 	format := malgo.FormatS16
 	bytesPerFrame := malgo.SampleSizeInBytes(format) * channels
@@ -167,4 +170,11 @@ func (c *Client) AwaitMark() error {
 	c.awaiting = true
 	c.wait.Wait()
 	return nil
+}
+
+func (c *Client) EncodingInfo() audio.EncodingInfo {
+	return audio.EncodingInfo{
+		SampleRate: sampleRate,
+		Encoding:   "linear16",
+	}
 }

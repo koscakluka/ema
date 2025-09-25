@@ -14,19 +14,31 @@ import (
 
 	api "github.com/deepgram/deepgram-go-sdk/pkg/api/listen/v1/websocket/interfaces"
 	"github.com/gorilla/websocket"
+	"github.com/koscakluka/ema/core/audio"
 	"github.com/koscakluka/ema/core/speechtotext"
 	"github.com/koscakluka/ema/internal/utils"
 )
 
-const sampleRate = 48000
+const (
+	defaultEncoding   = "linear16"
+	defaultSampleRate = 48000
+)
 
 func (s *TranscriptionClient) Transcribe(ctx context.Context, opts ...speechtotext.TranscriptionOption) error {
-	options := &speechtotext.TranscriptionOptions{}
+	options := &speechtotext.TranscriptionOptions{
+		EncodingInfo: audio.EncodingInfo{
+			SampleRate: defaultSampleRate,
+			Encoding:   defaultEncoding,
+		},
+	}
 	for _, opt := range opts {
 		opt(options)
 	}
 
 	conn, err := connectWebsocket(connectionOptions{
+		sampleRate: options.EncodingInfo.SampleRate,
+		encoding:   options.EncodingInfo.Encoding,
+
 		detectSpeechStart: options.SpeechStartedCallback != nil,
 		enhanceSpeechEndingDetection: options.TranscriptionCallback != nil ||
 			options.SpeechEndedCallback != nil,
@@ -43,6 +55,9 @@ func (s *TranscriptionClient) Transcribe(ctx context.Context, opts ...speechtote
 }
 
 type connectionOptions struct {
+	sampleRate int
+	encoding   string
+
 	detectSpeechStart            bool
 	enhanceSpeechEndingDetection bool
 	interimResults               bool
@@ -56,8 +71,8 @@ func connectWebsocket(options connectionOptions) (*websocket.Conn, error) {
 
 	listenUrl, _ := url.Parse("wss://api.deepgram.com/v1/listen")
 	queryParams := listenUrl.Query()
-	queryParams.Set("encoding", "linear16")
-	queryParams.Set("sample_rate", strconv.Itoa(sampleRate))
+	queryParams.Set("encoding", options.encoding)
+	queryParams.Set("sample_rate", strconv.Itoa(options.sampleRate))
 	queryParams.Set("channels", "1")
 	queryParams.Set("model", "nova-3")
 	queryParams.Set("language", "en-US")
@@ -252,7 +267,7 @@ func (s *TranscriptionClient) generateSilence(ctx context.Context) {
 	ticker := time.NewTicker(50 * time.Millisecond)
 
 	silenceValue := byte(0)
-	chunk := make([]byte, 50*sampleRate/1000)
+	chunk := make([]byte, 50*defaultSampleRate/1000)
 	for i := range chunk {
 		chunk[i] = silenceValue
 	}
