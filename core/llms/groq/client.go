@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/jinzhu/copier"
@@ -61,25 +62,70 @@ type responseBody struct {
 
 type Client struct {
 	apiKey string
+
+	model        string
+	tools        []llms.Tool
+	systemPrompt llms.Message
 }
 
-func NewClient() *Client {
-	apiKey, ok := os.LookupEnv("GROQ_API_KEY")
-	if !ok {
-		return nil
+func NewClient(opts ...ClientOption) (*Client, error) {
+	client := Client{
+		model: defaultModel,
+		systemPrompt: llms.Message{
+			Role:    llms.MessageRoleSystem,
+			Content: defaultPrompt,
+		},
 	}
 
-	return &Client{apiKey: apiKey}
+	for _, opt := range opts {
+		opt(&client)
+	}
+
+	if client.apiKey == "" {
+		apiKey, ok := os.LookupEnv("GROQ_API_KEY")
+		if !ok {
+			return nil, fmt.Errorf("groq api key neither found (GROQ_API_KEY) nor provided")
+		}
+
+		client.apiKey = apiKey
+	}
+
+	return &client, nil
+}
+
+type ClientOption func(*Client)
+
+func WithModel(model string) ClientOption {
+	return func(c *Client) {
+		c.model = model
+	}
+}
+
+func WithTools(tools ...llms.Tool) ClientOption {
+	return func(c *Client) {
+		c.tools = slices.Clone(tools)
+	}
+}
+
+func WithSystemPrompt(prompt string) ClientOption {
+	return func(c *Client) {
+		c.systemPrompt = llms.Message{
+			Role:    llms.MessageRoleSystem,
+			Content: prompt,
+		}
+	}
+}
+
+func WithAPIKey(apiKey string) ClientOption {
+	return func(c *Client) {
+		c.apiKey = apiKey
+	}
 }
 
 func (c *Client) Prompt(ctx context.Context, prompt string, opts ...llms.PromptOption) ([]llms.Message, error) {
 	options := llms.PromptOptions{
-		Messages: []llms.Message{
-			{
-				Role:    llms.MessageRoleSystem,
-				Content: defaultPrompt,
-			},
-		},
+		Messages: []llms.Message{c.systemPrompt},
+		Tools:    slices.Clone(c.tools),
 	}
 	for _, opt := range opts {
 		opt(&options)
@@ -107,7 +153,7 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...llms.PromptO
 
 	for {
 		reqBody := requestBody{
-			Model:      defaultModel,
+			Model:      c.model,
 			Messages:   messages,
 			Stream:     true,
 			Tools:      tools,

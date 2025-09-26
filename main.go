@@ -379,8 +379,13 @@ func main() {
 
 	audioClient, err := portaudio.NewClient(128)
 
+	llm, err := groq.NewClient()
+	if err != nil {
+		log.Fatalf("Failed to create groq client: %v", err)
+	}
+
 	orchestrator := orchestration.NewOrchestrator(
-		orchestration.WithLLM(groq.NewClient()),
+		orchestration.WithLLM(llm),
 		orchestration.WithSpeechToTextClient(deepgramClient),
 		orchestration.WithTextToSpeechClient(deepgramSpeechClient),
 		orchestration.WithAudioInput(audioClient),
