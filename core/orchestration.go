@@ -8,7 +8,6 @@ import (
 
 	"github.com/koscakluka/ema/core/audio"
 	"github.com/koscakluka/ema/core/llms"
-	"github.com/koscakluka/ema/core/llms/groq"
 	"github.com/koscakluka/ema/core/speechtotext"
 	"github.com/koscakluka/ema/core/texttospeech"
 )
@@ -30,6 +29,7 @@ type Orchestrator struct {
 
 	tools []llms.Tool
 
+	llm                LLM
 	speechToTextClient SpeechToText
 	textToSpeechClient TextToSpeech
 	audioInput         AudioInput
@@ -52,6 +52,12 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 }
 
 type OrchestratorOption func(*Orchestrator)
+
+func WithLLM(client LLM) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.llm = client
+	}
+}
 
 func WithSpeechToTextClient(client SpeechToText) OrchestratorOption {
 	return func(o *Orchestrator) {
@@ -94,8 +100,6 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 	for _, opt := range opts {
 		opt(&options)
 	}
-
-	client := groq.NewClient()
 
 	if err := o.textToSpeechClient.OpenStream(context.TODO(),
 		texttospeech.WithEncodingInfo(o.audioOutput.EncodingInfo()),
@@ -194,10 +198,10 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				Content: transcript,
 			})
 
-			response, _ := client.Prompt(context.TODO(), transcript,
-				groq.WithMessages(messages...),
-				groq.WithTools(o.tools...),
-				groq.WithStream(
+			response, _ := o.llm.Prompt(context.TODO(), transcript,
+				llms.WithMessages(messages...),
+				llms.WithTools(o.tools...),
+				llms.WithStream(
 					func(data string) {
 						if options.onResponse != nil {
 							options.onResponse(data)
@@ -301,6 +305,10 @@ func (o *Orchestrator) SetSpeaking(isSpeaking bool) {
 
 func (o *Orchestrator) SetAlwaysRecording(isAlwaysRecording bool) {
 	o.AlwaysRecording = isAlwaysRecording
+}
+
+type LLM interface {
+	Prompt(ctx context.Context, prompt string, opts ...llms.PromptOption) ([]llms.Message, error)
 }
 
 type SpeechToText interface {

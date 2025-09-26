@@ -14,6 +14,7 @@ import (
 
 	"github.com/koscakluka/ema/core"
 	"github.com/koscakluka/ema/core/audio/portaudio"
+	"github.com/koscakluka/ema/core/llms/groq"
 	deepgrams2t "github.com/koscakluka/ema/core/speechtotext/deepgram"
 	deepgramt2s "github.com/koscakluka/ema/core/texttospeech/deepgram"
 	"github.com/koscakluka/ema/internal/utils"
@@ -379,6 +380,7 @@ func main() {
 	audioClient, err := portaudio.NewClient(128)
 
 	orchestrator := orchestration.NewOrchestrator(
+		orchestration.WithLLM(groq.NewClient()),
 		orchestration.WithSpeechToTextClient(deepgramClient),
 		orchestration.WithTextToSpeechClient(deepgramSpeechClient),
 		orchestration.WithAudioInput(audioClient),
