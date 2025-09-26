@@ -52,8 +52,8 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType, 
 	case InterruptionTypeAction:
 		client := groq.NewClient()
 		if _, err := client.Prompt(context.TODO(), prompt,
-			groq.WithForcedTools(o.tools...),
-			groq.WithMessages(o.messages...),
+			llms.WithForcedTools(o.tools...),
+			llms.WithMessages(o.messages...),
 		); err != nil {
 			// TODO: Retry?
 			return nil, fmt.Errorf("failed to call tool LLM: %w", err)
@@ -88,16 +88,14 @@ Accessible tools:
 )
 
 func (o *Orchestrator) classifyInterruption(prompt string) (interruptionType, error) {
-	client := groq.NewClient()
-
 	systemPrompt := interruptionClassifierSystemPrompt
 	for _, tool := range o.tools {
 		systemPrompt += fmt.Sprintf("- %s: %s", tool.Function.Name, tool.Function.Description)
 	}
 
-	response, _ := client.Prompt(context.TODO(), prompt,
-		groq.WithSystemPrompt(systemPrompt),
-		groq.WithMessages(o.messages...),
+	response, _ := o.llm.Prompt(context.TODO(), prompt,
+		llms.WithSystemPrompt(systemPrompt),
+		llms.WithMessages(o.messages...),
 	)
 
 	if len(response) == 0 || len(response[0].Content) == 0 {

@@ -72,63 +72,9 @@ func NewClient() *Client {
 	return &Client{apiKey: apiKey}
 }
 
-type PromptOptions struct {
-	Messages        []message
-	Stream          func(string)
-	Tools           []Tool
-	ForcedToolsCall bool
-}
-
-type PromptOption func(*PromptOptions)
-
-func WithStream(stream func(string)) PromptOption {
-	return func(opts *PromptOptions) {
-		opts.Stream = stream
-	}
-}
-
-func WithSystemPrompt(prompt string) PromptOption {
-	return func(opts *PromptOptions) {
-		if len(opts.Messages) == 0 {
-			opts.Messages = append(opts.Messages, message{
-				Role:    llms.MessageRoleSystem,
-				Content: prompt,
-			})
-		} else if opts.Messages[0].Role == llms.MessageRoleSystem {
-			opts.Messages[0].Content = prompt
-		} else {
-			opts.Messages = append([]message{{
-				Role:    llms.MessageRoleSystem,
-				Content: prompt,
-			}}, opts.Messages...)
-		}
-	}
-}
-
-func WithMessages(messages ...llms.Message) PromptOption {
-	return func(opts *PromptOptions) {
-		var msgs []message
-		copier.Copy(&msgs, messages)
-		opts.Messages = append(opts.Messages, msgs...)
-	}
-}
-
-func WithTools(tools ...llms.Tool) PromptOption {
-	return func(opts *PromptOptions) {
-		copier.Copy(&opts.Tools, tools)
-	}
-}
-
-func WithForcedTools(tools ...llms.Tool) PromptOption {
-	return func(opts *PromptOptions) {
-		copier.Copy(&opts.Tools, tools)
-		opts.ForcedToolsCall = true
-	}
-}
-
-func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption) ([]llms.Message, error) {
-	options := PromptOptions{
-		Messages: []message{
+func (c *Client) Prompt(ctx context.Context, prompt string, opts ...llms.PromptOption) ([]llms.Message, error) {
+	options := llms.PromptOptions{
+		Messages: []llms.Message{
 			{
 				Role:    llms.MessageRoleSystem,
 				Content: defaultPrompt,
@@ -139,18 +85,22 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption
 		opt(&options)
 	}
 
-	messages := append(options.Messages, message{
+	var messages []message
+	copier.Copy(&messages, options.Messages)
+	messages = append(messages, message{
 		Role:    llms.MessageRoleUser,
 		Content: prompt,
 	})
 
 	var toolChoice *string
+	var tools []Tool
 	if options.Tools != nil {
 		toolChoice = utils.Ptr("auto")
 
 		if options.ForcedToolsCall {
 			toolChoice = utils.Ptr("required")
 		}
+		copier.Copy(&tools, options.Tools)
 	}
 
 	responses := []message{}
@@ -160,7 +110,7 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...PromptOption
 			Model:      defaultModel,
 			Messages:   messages,
 			Stream:     true,
-			Tools:      options.Tools,
+			Tools:      tools,
 			ToolChoice: toolChoice,
 		}
 
