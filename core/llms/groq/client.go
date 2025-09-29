@@ -234,7 +234,7 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...llms.PromptO
 		responses = append(responses, msg)
 		if len(toolCalls) == 0 {
 			llmResponses := []llms.Message{}
-			copier.Copy(&llmResponses, messages)
+			copier.Copy(&llmResponses, responses)
 			return llmResponses, nil
 		}
 
