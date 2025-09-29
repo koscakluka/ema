@@ -66,6 +66,29 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType, 
 	}
 }
 
+type SimpleInterruptionClassifier struct {
+	llm   LLM
+	tools []llms.Tool
+}
+
+func NewSimpleInterruptionClassifier(llm LLM, opts ...InterruptionClassifierOption) *SimpleInterruptionClassifier {
+	classifier := &SimpleInterruptionClassifier{
+		llm: llm,
+	}
+	for _, opt := range opts {
+		opt(classifier)
+	}
+	return classifier
+}
+
+type InterruptionClassifierOption func(*SimpleInterruptionClassifier)
+
+func ClassifierWithTools(tools []llms.Tool) InterruptionClassifierOption {
+	return func(c *SimpleInterruptionClassifier) {
+		c.tools = tools
+	}
+}
+
 const (
 	interruptionClassifierSystemPrompt = `You are a helpful assistant that can classify a prompt type of interruption to the conversation.
 
@@ -85,20 +108,27 @@ Accessible tools:
 `
 )
 
-func (o *Orchestrator) classifyInterruption(prompt string) (interruptionType, error) {
+func (c SimpleInterruptionClassifier) Classify(prompt string, history []llms.Message, opts ...ClassifyOption) (interruptionType, error) {
+	options := ClassifyOptions{}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	systemPrompt := interruptionClassifierSystemPrompt
-	for _, tool := range o.tools {
+	for _, tool := range append(c.tools, options.Tools...) {
 		systemPrompt += fmt.Sprintf("- %s: %s", tool.Function.Name, tool.Function.Description)
 	}
 
-	response, _ := o.llm.Prompt(context.TODO(), prompt,
+	response, _ := c.llm.Prompt(context.TODO(), prompt,
 		llms.WithSystemPrompt(systemPrompt),
-		llms.WithMessages(o.messages...),
+		llms.WithMessages(history...),
 	)
 
 	if len(response) == 0 || len(response[0].Content) == 0 {
 		return "", fmt.Errorf("no response from interruption classifier")
 	}
+
+	log.Println("Interruption classified as '", response, "'")
 
 	var unmarshalledResponse struct {
 		Classification string `json:"classification"`
@@ -128,6 +158,18 @@ func (o *Orchestrator) classifyInterruption(prompt string) (interruptionType, er
 		return InterruptionTypeNewPrompt, nil
 	default:
 		return "", fmt.Errorf("unknown interruption type: %s", unmarshalledResponse.Classification)
+	}
+}
+
+type ClassifyOption func(*ClassifyOptions)
+
+type ClassifyOptions struct {
+	Tools []llms.Tool
+}
+
+func ClassifyWithTools(tools []llms.Tool) ClassifyOption {
+	return func(o *ClassifyOptions) {
+		o.Tools = tools
 	}
 }
 

@@ -29,11 +29,12 @@ type Orchestrator struct {
 
 	tools []llms.Tool
 
-	llm                LLM
-	speechToTextClient SpeechToText
-	textToSpeechClient TextToSpeech
-	audioInput         AudioInput
-	audioOutput        AudioOutput
+	llm                    LLM
+	speechToTextClient     SpeechToText
+	textToSpeechClient     TextToSpeech
+	audioInput             AudioInput
+	audioOutput            AudioOutput
+	interruptionClassifier InterruptionClassifier
 }
 
 func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
@@ -92,6 +93,12 @@ func WithTools(tools ...llms.Tool) OrchestratorOption {
 func WithOrchestrationTools() OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.tools = append(o.tools, orchestrationTools(o)...)
+	}
+}
+
+func WithInterruptionClassifier(classifier InterruptionClassifier) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.interruptionClassifier = classifier
 	}
 }
 
@@ -160,14 +167,16 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 			}
 			passthrough := &transcript
 			if o.interruption {
-				interruption, err := o.classifyInterruption(transcript)
-				if err != nil {
-					// TODO: Retry?
-					log.Printf("Failed to classify interruption: %v", err)
-				} else {
-					passthrough, err = o.respondToInterruption(transcript, interruption, options)
+				if o.interruptionClassifier != nil {
+					interruption, err := o.interruptionClassifier.Classify(transcript, o.messages, ClassifyWithTools(o.tools))
 					if err != nil {
-						log.Printf("Failed to respond to interruption: %v", err)
+						// TODO: Retry?
+						log.Printf("Failed to classify interruption: %v", err)
+					} else {
+						passthrough, err = o.respondToInterruption(transcript, interruption, options)
+						if err != nil {
+							log.Printf("Failed to respond to interruption: %v", err)
+						}
 					}
 				}
 				o.interruption = false
@@ -333,4 +342,8 @@ type AudioOutput interface {
 	SendAudio(audio []byte) error
 	AwaitMark() error
 	ClearBuffer()
+}
+
+type InterruptionClassifier interface {
+	Classify(prompt string, history []llms.Message, opts ...ClassifyOption) (interruptionType, error)
 }
