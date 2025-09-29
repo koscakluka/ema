@@ -49,6 +49,10 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 		opt(o)
 	}
 
+	if o.interruptionClassifier == nil {
+		o.interruptionClassifier = NewSimpleInterruptionClassifier(o.llm)
+	}
+
 	return o
 }
 

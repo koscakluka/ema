@@ -391,7 +391,6 @@ func main() {
 		orchestration.WithAudioInput(audioClient),
 		orchestration.WithAudioOutput(audioClient),
 		orchestration.WithOrchestrationTools(),
-		orchestration.WithInterruptionClassifier(orchestration.NewSimpleInterruptionClassifier(llm)),
 	)
 
 	program = tea.NewProgram(
