@@ -188,32 +188,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					options.onInterimTranscription("")
 				}
 
-				if o.activePrompt != nil && !o.interruption {
-					o.interruption = true
-				}
-				passthrough := &transcript
-				if o.interruption {
-					if o.interruptionClassifier != nil {
-						interruption, err := o.interruptionClassifier.Classify(transcript, o.messages, ClassifyWithTools(o.tools))
-						if err != nil {
-							// TODO: Retry?
-							log.Printf("Failed to classify interruption: %v", err)
-						} else {
-							passthrough, err = o.respondToInterruption(transcript, interruption, options)
-							if err != nil {
-								log.Printf("Failed to respond to interruption: %v", err)
-							}
-						}
-					}
-					o.interruption = false
-				}
-				if passthrough != nil {
-					if options.onTranscription != nil {
-						options.onTranscription(transcript)
-					}
-					o.transcripts <- *passthrough
-				}
-
+				o.SendPrompt(transcript, opts...)
 			}),
 		}
 		if o.audioInput != nil {
@@ -244,6 +219,10 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				llms.WithTools(o.tools...),
 				llms.WithStream(
 					func(data string) {
+						if o.canceled {
+							return
+						}
+
 						if options.onResponse != nil {
 							options.onResponse(data)
 						}
@@ -259,6 +238,11 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				if err := o.textToSpeechClient.FlushBuffer(); err != nil {
 					log.Printf("Failed to flush buffer: %v", err)
 				}
+			} else {
+				o.activePrompt = nil
+				o.canceled = false
+				o.promptEnded.Done()
+
 			}
 			if options.onResponseEnd != nil {
 				options.onResponseEnd()
@@ -347,6 +331,40 @@ func (o *Orchestrator) Close() {
 	// TODO: Make sure that deepgramClient is closed and no longer transcribing
 	// before closing the channel
 	close(o.transcripts)
+}
+
+func (o *Orchestrator) SendPrompt(prompt string, opts ...OrchestrateOption) {
+	options := OrchestrateOptions{}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	if o.activePrompt != nil && !o.interruption {
+		o.interruption = true
+	}
+
+	passthrough := &prompt
+	if o.interruption {
+		if o.interruptionClassifier != nil {
+			interruption, err := o.interruptionClassifier.Classify(prompt, o.messages, ClassifyWithTools(o.tools))
+			if err != nil {
+				// TODO: Retry?
+				log.Printf("Failed to classify interruption: %v", err)
+			} else {
+				passthrough, err = o.respondToInterruption(prompt, interruption, options)
+				if err != nil {
+					log.Printf("Failed to respond to interruption: %v", err)
+				}
+			}
+		}
+		o.interruption = false
+	}
+	if passthrough != nil {
+		if options.onTranscription != nil {
+			options.onTranscription(prompt)
+		}
+		o.transcripts <- *passthrough
+	}
 }
 
 func (o *Orchestrator) SendAudio(audio []byte) error {
