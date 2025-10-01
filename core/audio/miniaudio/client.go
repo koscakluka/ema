@@ -95,14 +95,14 @@ func NewClient() (*Client, error) {
 		return nil, err
 	}
 
+	if err := client.pbDev.Start(); err != nil {
+		log.Fatalf("Start playback failed: %v", err)
+	}
+
 	return &client, nil
 }
 
 func (c *Client) Stream(ctx context.Context, onAudio func(audio []byte)) error {
-	if err := c.pbDev.Start(); err != nil {
-		log.Fatalf("Start playback failed: %v", err)
-	}
-
 	sampleRate := uint32(sampleRate)
 	channels := 1
 	format := malgo.FormatS16
