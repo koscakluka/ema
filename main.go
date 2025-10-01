@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"github.com/koscakluka/ema/core"
-	"github.com/koscakluka/ema/core/audio/portaudio"
+	"github.com/koscakluka/ema/core/audio/miniaudio"
 	"github.com/koscakluka/ema/core/llms/groq"
-	deepgrams2t "github.com/koscakluka/ema/core/speechtotext/deepgram"
 	deepgramt2s "github.com/koscakluka/ema/core/texttospeech/deepgram"
 	"github.com/koscakluka/ema/internal/utils"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -77,6 +77,7 @@ type model struct {
 	interimTranscript string
 
 	viewport        viewport.Model
+	input           textarea.Model
 	automaticScroll bool
 
 	endRecordingTimer *time.Timer
@@ -102,14 +103,14 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	viewportHeight := m.termHeight - viewportPadding*2 - 3
+	viewportHeight := m.termHeight - viewportPadding*2 - 3 - 3
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
 
-		viewportHeight = m.termHeight - viewportPadding*2 - 3
+		viewportHeight = m.termHeight - viewportPadding*2 - 3 - 3
 		if !m.ready {
 			m.viewport = viewport.New(m.viewportWidth(), viewportHeight)
 			m.ready = true
@@ -117,37 +118,54 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Width = m.viewportWidth()
 			m.viewport.Height = viewportHeight
 		}
+		m.input.SetWidth(m.viewportWidth())
 		m.viewport.SetContent(m.getContent())
 		return m, nil
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case " ":
-			m.orchestrator.IsRecording = true
-			if m.endRecordingTimer != nil {
-				if !m.endRecordingTimer.Stop() {
-					select {
-					case <-m.endRecordingTimer.C:
-						return m, func() tea.Msg { return endRecordingMsg{} }
-					default:
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+
+		if m.input.Focused() {
+			switch msg.String() {
+			case "esc":
+				m.input.Blur()
+
+			case "enter":
+				go m.orchestrator.SendPrompt(m.input.Value())
+				m.input.SetValue("")
+			}
+		} else {
+			switch msg.String() {
+			case " ":
+				m.orchestrator.IsRecording = true
+				if m.endRecordingTimer != nil {
+					if !m.endRecordingTimer.Stop() {
+						select {
+						case <-m.endRecordingTimer.C:
+							return m, func() tea.Msg { return endRecordingMsg{} }
+						default:
+						}
 					}
 				}
+				m.endRecordingTimer = time.NewTimer(time.Millisecond * 100)
+
+				return m, func() tea.Msg {
+					<-m.endRecordingTimer.C
+					return endRecordingMsg{}
+				}
+			case "a":
+				m.input.Focus()
+				return m, nil
+
+			case "l":
+				m.orchestrator.SetAlwaysRecording(!m.orchestrator.AlwaysRecording)
+
+			case "m":
+				m.orchestrator.SetSpeaking(!m.orchestrator.IsSpeaking)
+
 			}
-			m.endRecordingTimer = time.NewTimer(time.Millisecond * 100)
-
-			return m, func() tea.Msg {
-				<-m.endRecordingTimer.C
-				return endRecordingMsg{}
-			}
-
-		case "l":
-			m.orchestrator.SetAlwaysRecording(!m.orchestrator.AlwaysRecording)
-
-		case "m":
-			m.orchestrator.SetSpeaking(!m.orchestrator.IsSpeaking)
-
-		case "ctrl+c", "q":
-			return m, tea.Quit
 		}
 
 	case endRecordingMsg:
@@ -275,6 +293,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	m.input, _ = m.input.Update(msg)
 	m.viewport, _ = m.viewport.Update(msg)
 	if m.viewport.AtBottom() {
 		m.automaticScroll = true
@@ -317,7 +336,7 @@ func (m model) View() string {
 	mainStyle := lipgloss.NewStyle().
 		Padding(1).
 		Width(m.termWidth - sidebarOuterWidth).
-		Height(m.termHeight - 3)
+		Height(m.termHeight - 3 - 3)
 
 	sidebarStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -325,7 +344,7 @@ func (m model) View() string {
 		Width(sidebarWidth).
 		Height(m.termHeight - 2)
 
-	mainContent := mainStyle.Render(m.viewport.View())
+	mainContent := mainStyle.Render(m.viewport.View(), lipgloss.NewStyle().PaddingTop(1).Render(m.input.View()))
 
 	sidebarLabelStyle := lipgloss.NewStyle().
 		Bold(true).Foreground(lipgloss.Color("220"))
@@ -352,7 +371,7 @@ func (m model) View() string {
 	footer := lipgloss.NewStyle().
 		PaddingTop(1).
 		Foreground(lipgloss.Color("241")).
-		Render("Press 'q' or 'Ctrl+C' to quit")
+		Render("Press 'Ctrl+C' to quit")
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
 		lipgloss.JoinVertical(lipgloss.Left,
@@ -363,12 +382,41 @@ func (m model) View() string {
 	)
 }
 
+func initialModel(orchestrator *orchestration.Orchestrator) model {
+	textarea := textarea.New()
+	textarea.Placeholder = "Press 't' to type a prompt"
+
+	textarea.Prompt = "┃ "
+	textarea.CharLimit = 1024
+
+	textarea.SetWidth(30)
+	textarea.SetHeight(3)
+
+	// Remove cursor line styling
+	textarea.FocusedStyle.CursorLine = lipgloss.NewStyle()
+
+	textarea.ShowLineNumbers = false
+	// TODO: Find a way to support multiline input
+	textarea.KeyMap.InsertNewline.SetEnabled(false)
+
+	return model{
+		output:            &strings.Builder{},
+		automaticScroll:   true,
+		orchestrator:      orchestrator,
+		buffer:            bytes.NewBuffer([]byte{}),
+		buffering:         utils.Ptr(false),
+		receivingResponse: utils.Ptr(false),
+		promptsQueue:      []promptPair{},
+		input:             textarea,
+	}
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	deepgramClient := deepgrams2t.NewClient(ctx)
-	defer deepgramClient.Close()
+	// deepgramClient := deepgrams2t.NewClient(ctx)
+	// defer deepgramClient.Close()
 
 	voice := deepgramt2s.VoiceAuraAsteria
 	deepgramSpeechClient, err := deepgramt2s.NewTextToSpeechClient(context.TODO(), voice)
@@ -377,7 +425,7 @@ func main() {
 	}
 	defer deepgramSpeechClient.Close(ctx)
 
-	audioClient, err := portaudio.NewClient(128)
+	audioClient, err := miniaudio.NewClient()
 
 	llm, err := groq.NewClient()
 	if err != nil {
@@ -386,23 +434,15 @@ func main() {
 
 	orchestrator := orchestration.NewOrchestrator(
 		orchestration.WithLLM(llm),
-		orchestration.WithSpeechToTextClient(deepgramClient),
+		// orchestration.WithSpeechToTextClient(deepgramClient),
 		orchestration.WithTextToSpeechClient(deepgramSpeechClient),
-		orchestration.WithAudioInput(audioClient),
+		// orchestration.WithAudioInput(audioClient),
 		orchestration.WithAudioOutput(audioClient),
 		orchestration.WithOrchestrationTools(),
 	)
 
 	program = tea.NewProgram(
-		model{
-			output:            &strings.Builder{},
-			automaticScroll:   true,
-			orchestrator:      orchestrator,
-			buffer:            bytes.NewBuffer([]byte{}),
-			buffering:         utils.Ptr(false),
-			receivingResponse: utils.Ptr(false),
-			promptsQueue:      []promptPair{},
-		},
+		initialModel(orchestrator),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)
