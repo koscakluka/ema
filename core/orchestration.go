@@ -12,8 +12,6 @@ import (
 	"github.com/koscakluka/ema/core/texttospeech"
 )
 
-const bufferSize = 128
-
 type Orchestrator struct {
 	AlwaysRecording bool
 	IsRecording     bool
@@ -39,9 +37,9 @@ type Orchestrator struct {
 
 func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 	o := &Orchestrator{
-		AlwaysRecording: true,
+		AlwaysRecording: false,
 		IsRecording:     false,
-		IsSpeaking:      true,
+		IsSpeaking:      false,
 		transcripts:     make(chan string, 10), // TODO: Figure out good valiues for this
 	}
 
@@ -73,6 +71,7 @@ func WithSpeechToTextClient(client SpeechToText) OrchestratorOption {
 func WithTextToSpeechClient(client TextToSpeech) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.textToSpeechClient = client
+		o.IsSpeaking = true
 	}
 }
 
@@ -112,89 +111,118 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 		opt(&options)
 	}
 
-	if err := o.textToSpeechClient.OpenStream(context.TODO(),
-		texttospeech.WithEncodingInfo(o.audioOutput.EncodingInfo()),
-		texttospeech.WithAudioCallback(func(audio []byte) {
-			if !o.IsSpeaking || o.canceled {
-				o.audioOutput.ClearBuffer()
-				return
-			}
+	if o.textToSpeechClient != nil {
+		ttsOptions := []texttospeech.TextToSpeechOption{
+			texttospeech.WithAudioCallback(func(audio []byte) {
+				if options.onAudio != nil {
+					options.onAudio(audio)
+				}
 
-			o.audioOutput.SendAudio(audio)
-		}),
-		texttospeech.WithAudioEndedCallback(func(transcript string) {
-			defer func() {
-				o.activePrompt = nil
-				o.canceled = false
-				o.promptEnded.Done()
-			}()
-			if !o.IsSpeaking || o.canceled {
-				o.audioOutput.ClearBuffer()
-				return
-			}
+				if o.audioOutput == nil {
+					return
+				}
 
-			o.audioOutput.SendAudio([]byte{})
-			o.audioOutput.AwaitMark()
-		}),
-	); err != nil {
-		log.Printf("Failed to open deepgram speech stream: %v", err)
+				if !o.IsSpeaking || o.canceled {
+					o.audioOutput.ClearBuffer()
+					return
+				}
+
+				o.audioOutput.SendAudio(audio)
+			}),
+			texttospeech.WithAudioEndedCallback(func(transcript string) {
+				defer func() {
+					o.activePrompt = nil
+					o.canceled = false
+					o.promptEnded.Done()
+				}()
+
+				if options.onAudioEnded != nil {
+					options.onAudioEnded(transcript)
+				}
+
+				if o.audioOutput == nil {
+					return
+				}
+
+				if !o.IsSpeaking || o.canceled {
+					o.audioOutput.ClearBuffer()
+					return
+				}
+
+				o.audioOutput.SendAudio([]byte{})
+				o.audioOutput.AwaitMark()
+			}),
+		}
+		if o.audioOutput != nil {
+			ttsOptions = append(ttsOptions, texttospeech.WithEncodingInfo(o.audioOutput.EncodingInfo()))
+		}
+
+		if err := o.textToSpeechClient.OpenStream(context.TODO(), ttsOptions...); err != nil {
+			log.Printf("Failed to open deepgram speech stream: %v", err)
+		}
 	}
 
-	if err := o.speechToTextClient.Transcribe(context.TODO(),
-		speechtotext.WithEncodingInfo(o.audioInput.EncodingInfo()),
-		speechtotext.WithSpeechStartedCallback(func() {
-			if options.onSpeakingStateChanged != nil {
-				options.onSpeakingStateChanged(true)
-			}
-		}),
-		speechtotext.WithSpeechEndedCallback(func() {
-			if options.onSpeakingStateChanged != nil {
-				options.onSpeakingStateChanged(false)
-			}
-		}),
-		speechtotext.WithInterimTranscriptionCallback(func(transcript string) {
-			if o.activePrompt != nil && !o.interruption {
-				o.interruption = true
-			}
+	if o.speechToTextClient != nil {
+		sttOptions := []speechtotext.TranscriptionOption{
+			speechtotext.WithSpeechStartedCallback(func() {
+				if options.onSpeakingStateChanged != nil {
+					options.onSpeakingStateChanged(true)
+				}
+			}),
+			speechtotext.WithSpeechEndedCallback(func() {
+				if options.onSpeakingStateChanged != nil {
+					options.onSpeakingStateChanged(false)
+				}
+			}),
+			speechtotext.WithInterimTranscriptionCallback(func(transcript string) {
+				if o.activePrompt != nil && !o.interruption {
+					o.interruption = true
+				}
 
-			if options.onInterimTranscription != nil {
-				options.onInterimTranscription(transcript)
-			}
-		}),
-		speechtotext.WithTranscriptionCallback(func(transcript string) {
-			if options.onInterimTranscription != nil {
-				options.onInterimTranscription("")
-			}
+				if options.onInterimTranscription != nil {
+					options.onInterimTranscription(transcript)
+				}
+			}),
+			speechtotext.WithTranscriptionCallback(func(transcript string) {
+				if options.onInterimTranscription != nil {
+					options.onInterimTranscription("")
+				}
 
-			if o.activePrompt != nil && !o.interruption {
-				o.interruption = true
-			}
-			passthrough := &transcript
-			if o.interruption {
-				if o.interruptionClassifier != nil {
-					interruption, err := o.interruptionClassifier.Classify(transcript, o.messages, ClassifyWithTools(o.tools))
-					if err != nil {
-						// TODO: Retry?
-						log.Printf("Failed to classify interruption: %v", err)
-					} else {
-						passthrough, err = o.respondToInterruption(transcript, interruption, options)
+				if o.activePrompt != nil && !o.interruption {
+					o.interruption = true
+				}
+				passthrough := &transcript
+				if o.interruption {
+					if o.interruptionClassifier != nil {
+						interruption, err := o.interruptionClassifier.Classify(transcript, o.messages, ClassifyWithTools(o.tools))
 						if err != nil {
-							log.Printf("Failed to respond to interruption: %v", err)
+							// TODO: Retry?
+							log.Printf("Failed to classify interruption: %v", err)
+						} else {
+							passthrough, err = o.respondToInterruption(transcript, interruption, options)
+							if err != nil {
+								log.Printf("Failed to respond to interruption: %v", err)
+							}
 						}
 					}
+					o.interruption = false
 				}
-				o.interruption = false
-			}
-			if passthrough != nil {
-				if options.onTranscription != nil {
-					options.onTranscription(transcript)
+				if passthrough != nil {
+					if options.onTranscription != nil {
+						options.onTranscription(transcript)
+					}
+					o.transcripts <- *passthrough
 				}
-				o.transcripts <- *passthrough
-			}
 
-		}),
-	); err != nil {
-		log.Fatalf("Failed to start transcribing: %v", err)
+			}),
+		}
+		if o.audioInput != nil {
+			sttOptions = append(sttOptions, speechtotext.WithEncodingInfo(o.audioInput.EncodingInfo()))
+		}
+
+		if err := o.speechToTextClient.Transcribe(context.TODO(), sttOptions...); err != nil {
+			log.Fatalf("Failed to start transcribing: %v", err)
+		}
 	}
 
 	go func() {
@@ -219,14 +247,18 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 						if options.onResponse != nil {
 							options.onResponse(data)
 						}
-						if err := o.textToSpeechClient.SendText(data); err != nil {
-							log.Printf("Failed to send text to deepgram: %v", err)
+						if o.textToSpeechClient != nil {
+							if err := o.textToSpeechClient.SendText(data); err != nil {
+								log.Printf("Failed to send text to deepgram: %v", err)
+							}
 						}
 					}))
 
 			o.messages = append(o.messages, response...)
-			if err := o.textToSpeechClient.FlushBuffer(); err != nil {
-				log.Printf("Failed to flush buffer: %v", err)
+			if o.textToSpeechClient != nil {
+				if err := o.textToSpeechClient.FlushBuffer(); err != nil {
+					log.Printf("Failed to flush buffer: %v", err)
+				}
 			}
 			if options.onResponseEnd != nil {
 				options.onResponseEnd()
@@ -234,15 +266,20 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 		}
 	}()
 
-	go func() {
-		if err := o.audioInput.Stream(ctx, func(audio []byte) {
-			if err := o.speechToTextClient.SendAudio(audio); err != nil {
-				log.Printf("Failed to send audio to speech to text client: %v", err)
+	if o.audioInput != nil && o.speechToTextClient != nil {
+		o.AlwaysRecording = true
+		go func() {
+			if err := o.audioInput.Stream(ctx, func(audio []byte) {
+				if err := o.speechToTextClient.SendAudio(audio); err != nil {
+					log.Printf("Failed to send audio to speech to text client: %v", err)
+				}
+			}); err != nil {
+				log.Printf("Failed to start audio input streaming: %v", err)
 			}
-		}); err != nil {
-			log.Printf("Failed to start audio input streaming: %v", err)
-		}
-	}()
+		}()
+	} else if o.audioInput != nil && o.speechToTextClient == nil {
+		log.Println("Warning: skip starting input audio stream: audio input set but speech to text client is not set")
+	}
 }
 
 type OrchestrateOptions struct {
@@ -252,6 +289,8 @@ type OrchestrateOptions struct {
 	onResponse             func(response string)
 	onResponseEnd          func()
 	onCancellation         func()
+	onAudio                func(audio []byte)
+	onAudioEnded           func(transcript string)
 }
 
 type OrchestrateOption func(*OrchestrateOptions)
@@ -292,6 +331,18 @@ func WithCancellationCallback(callback func()) OrchestrateOption {
 	}
 }
 
+func WithAudioCallback(callback func(audio []byte)) OrchestrateOption {
+	return func(o *OrchestrateOptions) {
+		o.onAudio = callback
+	}
+}
+
+func WithAudioEndedCallback(callback func(transcript string)) OrchestrateOption {
+	return func(o *OrchestrateOptions) {
+		o.onAudioEnded = callback
+	}
+}
+
 func (o *Orchestrator) Close() {
 	// TODO: Make sure that deepgramClient is closed and no longer transcribing
 	// before closing the channel
@@ -313,7 +364,9 @@ func (o *Orchestrator) SendAudio(audio []byte) error {
 
 func (o *Orchestrator) SetSpeaking(isSpeaking bool) {
 	o.IsSpeaking = isSpeaking
-	o.audioOutput.ClearBuffer()
+	if o.audioOutput != nil {
+		o.audioOutput.ClearBuffer()
+	}
 }
 
 func (o *Orchestrator) SetAlwaysRecording(isAlwaysRecording bool) {
