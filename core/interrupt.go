@@ -10,13 +10,13 @@ import (
 	"github.com/koscakluka/ema/core/llms"
 )
 
-func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType, options OrchestrateOptions) (passthrough *string, err error) {
+func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) (passthrough *string, err error) {
 	// TODO: Check if this is still relevant (do we still have an active prompt)
 	switch t {
 	case InterruptionTypeContinuation:
 		o.canceled = true
-		if options.onCancellation != nil {
-			options.onCancellation()
+		if o.orchestrateOptions.onCancellation != nil {
+			o.orchestrateOptions.onCancellation()
 		}
 		lastPrompt := -1
 		for i := range o.messages {
@@ -33,15 +33,15 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType, 
 		return &prompt, nil
 	case InterruptionTypeClarification:
 		o.canceled = true
-		if options.onCancellation != nil {
-			options.onCancellation()
+		if o.orchestrateOptions.onCancellation != nil {
+			o.orchestrateOptions.onCancellation()
 		}
 		return &prompt, nil
 		// TODO: Properly passthrough the modified prompt
 	case InterruptionTypeCancellation:
 		o.canceled = true
-		if options.onCancellation != nil {
-			options.onCancellation()
+		if o.orchestrateOptions.onCancellation != nil {
+			o.orchestrateOptions.onCancellation()
 		}
 		return nil, nil
 	case InterruptionTypeIgnorable,

@@ -33,6 +33,8 @@ type Orchestrator struct {
 	audioInput             AudioInput
 	audioOutput            AudioOutput
 	interruptionClassifier InterruptionClassifier
+
+	orchestrateOptions OrchestrateOptions
 }
 
 func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
@@ -106,16 +108,16 @@ func WithInterruptionClassifier(classifier InterruptionClassifier) OrchestratorO
 }
 
 func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOption) {
-	options := OrchestrateOptions{}
+	o.orchestrateOptions = OrchestrateOptions{}
 	for _, opt := range opts {
-		opt(&options)
+		opt(&o.orchestrateOptions)
 	}
 
 	if o.textToSpeechClient != nil {
 		ttsOptions := []texttospeech.TextToSpeechOption{
 			texttospeech.WithAudioCallback(func(audio []byte) {
-				if options.onAudio != nil {
-					options.onAudio(audio)
+				if o.orchestrateOptions.onAudio != nil {
+					o.orchestrateOptions.onAudio(audio)
 				}
 
 				if o.audioOutput == nil {
@@ -136,8 +138,8 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					o.promptEnded.Done()
 				}()
 
-				if options.onAudioEnded != nil {
-					options.onAudioEnded(transcript)
+				if o.orchestrateOptions.onAudioEnded != nil {
+					o.orchestrateOptions.onAudioEnded(transcript)
 				}
 
 				if o.audioOutput == nil {
@@ -165,13 +167,13 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 	if o.speechToTextClient != nil {
 		sttOptions := []speechtotext.TranscriptionOption{
 			speechtotext.WithSpeechStartedCallback(func() {
-				if options.onSpeakingStateChanged != nil {
-					options.onSpeakingStateChanged(true)
+				if o.orchestrateOptions.onSpeakingStateChanged != nil {
+					o.orchestrateOptions.onSpeakingStateChanged(true)
 				}
 			}),
 			speechtotext.WithSpeechEndedCallback(func() {
-				if options.onSpeakingStateChanged != nil {
-					options.onSpeakingStateChanged(false)
+				if o.orchestrateOptions.onSpeakingStateChanged != nil {
+					o.orchestrateOptions.onSpeakingStateChanged(false)
 				}
 			}),
 			speechtotext.WithInterimTranscriptionCallback(func(transcript string) {
@@ -179,16 +181,16 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					o.interruption = true
 				}
 
-				if options.onInterimTranscription != nil {
-					options.onInterimTranscription(transcript)
+				if o.orchestrateOptions.onInterimTranscription != nil {
+					o.orchestrateOptions.onInterimTranscription(transcript)
 				}
 			}),
 			speechtotext.WithTranscriptionCallback(func(transcript string) {
-				if options.onInterimTranscription != nil {
-					options.onInterimTranscription("")
+				if o.orchestrateOptions.onInterimTranscription != nil {
+					o.orchestrateOptions.onInterimTranscription("")
 				}
 
-				o.SendPrompt(transcript, opts...)
+				o.SendPrompt(transcript)
 			}),
 		}
 		if o.audioInput != nil {
@@ -223,8 +225,8 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 							return
 						}
 
-						if options.onResponse != nil {
-							options.onResponse(data)
+						if o.orchestrateOptions.onResponse != nil {
+							o.orchestrateOptions.onResponse(data)
 						}
 						if o.textToSpeechClient != nil {
 							if err := o.textToSpeechClient.SendText(data); err != nil {
@@ -244,8 +246,8 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				o.promptEnded.Done()
 
 			}
-			if options.onResponseEnd != nil {
-				options.onResponseEnd()
+			if o.orchestrateOptions.onResponseEnd != nil {
+				o.orchestrateOptions.onResponseEnd()
 			}
 		}
 	}()
@@ -333,12 +335,7 @@ func (o *Orchestrator) Close() {
 	close(o.transcripts)
 }
 
-func (o *Orchestrator) SendPrompt(prompt string, opts ...OrchestrateOption) {
-	options := OrchestrateOptions{}
-	for _, opt := range opts {
-		opt(&options)
-	}
-
+func (o *Orchestrator) SendPrompt(prompt string) {
 	if o.activePrompt != nil && !o.interruption {
 		o.interruption = true
 	}
@@ -351,7 +348,7 @@ func (o *Orchestrator) SendPrompt(prompt string, opts ...OrchestrateOption) {
 				// TODO: Retry?
 				log.Printf("Failed to classify interruption: %v", err)
 			} else {
-				passthrough, err = o.respondToInterruption(prompt, interruption, options)
+				passthrough, err = o.respondToInterruption(prompt, interruption)
 				if err != nil {
 					log.Printf("Failed to respond to interruption: %v", err)
 				}
@@ -360,8 +357,8 @@ func (o *Orchestrator) SendPrompt(prompt string, opts ...OrchestrateOption) {
 		o.interruption = false
 	}
 	if passthrough != nil {
-		if options.onTranscription != nil {
-			options.onTranscription(prompt)
+		if o.orchestrateOptions.onTranscription != nil {
+			o.orchestrateOptions.onTranscription(prompt)
 		}
 		o.transcripts <- *passthrough
 	}
