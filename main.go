@@ -15,6 +15,7 @@ import (
 	"github.com/koscakluka/ema/core"
 	"github.com/koscakluka/ema/core/audio/miniaudio"
 	"github.com/koscakluka/ema/core/llms/groq"
+	deepgramstt "github.com/koscakluka/ema/core/speechtotext/deepgram"
 	deepgramt2s "github.com/koscakluka/ema/core/texttospeech/deepgram"
 	"github.com/koscakluka/ema/internal/utils"
 
@@ -415,8 +416,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// deepgramClient := deepgrams2t.NewClient(ctx)
-	// defer deepgramClient.Close()
+	deepgramClient := deepgramstt.NewClient(ctx)
+	defer deepgramClient.Close()
 
 	voice := deepgramt2s.VoiceAuraAsteria
 	deepgramSpeechClient, err := deepgramt2s.NewTextToSpeechClient(context.TODO(), voice)
@@ -434,9 +435,9 @@ func main() {
 
 	orchestrator := orchestration.NewOrchestrator(
 		orchestration.WithLLM(llm),
-		// orchestration.WithSpeechToTextClient(deepgramClient),
+		orchestration.WithSpeechToTextClient(deepgramClient),
 		orchestration.WithTextToSpeechClient(deepgramSpeechClient),
-		// orchestration.WithAudioInput(audioClient),
+		orchestration.WithAudioInput(audioClient),
 		orchestration.WithAudioOutput(audioClient),
 		orchestration.WithOrchestrationTools(),
 	)
