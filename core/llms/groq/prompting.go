@@ -16,7 +16,14 @@ import (
 	"github.com/koscakluka/ema/internal/utils"
 )
 
-func promptWithStream(
+const (
+	url = "https://api.groq.com/openai/v1/chat/completions"
+
+	endMessage  = "[DONE]"
+	chunkPrefix = "data:"
+)
+
+func PromptWithStream(
 	_ context.Context,
 	apiKey string,
 	model string,

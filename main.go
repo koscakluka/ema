@@ -427,7 +427,7 @@ func main() {
 
 	audioClient, err := miniaudio.NewClient()
 
-	llm, err := groq.NewClient()
+	llm, err := groq.NewLlama3370BVersatileClient()
 	if err != nil {
 		log.Fatalf("Failed to create groq client: %v", err)
 	}
