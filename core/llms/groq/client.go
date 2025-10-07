@@ -83,7 +83,7 @@ func (c *Client) Prompt(ctx context.Context, prompt string, opts ...llms.PromptO
 	return Prompt(ctx, c.apiKey, defaultModel, prompt, c.systemPrompt, c.tools, opts...)
 }
 
-func (c *Client) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream {
+func (c *Client) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, defaultModel, prompt, c.systemPrompt, c.tools, opts...)
 }
 
@@ -142,7 +142,7 @@ func (c *Llmaa3370BVersatileClient) Prompt(ctx context.Context, prompt string, o
 	return Prompt(ctx, c.apiKey, string(ModelLlama3370BVersatile), prompt, c.systemPrompt, c.tools, opts...)
 }
 
-func (c *Llmaa3370BVersatileClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream {
+func (c *Llmaa3370BVersatileClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelLlama3370BVersatile), prompt, c.systemPrompt, c.tools, opts...)
 }
 
@@ -173,7 +173,7 @@ func (c *Llama318BInstructClient) Prompt(ctx context.Context, prompt string, opt
 	return Prompt(ctx, c.apiKey, string(ModelLlama318BInstant), prompt, c.systemPrompt, c.tools, opts...)
 }
 
-func (c *Llama318BInstructClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream {
+func (c *Llama318BInstructClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelLlama318BInstant), prompt, c.systemPrompt, c.tools, opts...)
 }
 
@@ -204,7 +204,7 @@ func (c *GPTOSS20BClient) Prompt(ctx context.Context, prompt string, opts ...llm
 	return Prompt(ctx, c.apiKey, string(ModelGPTOSS20B), prompt, c.systemPrompt, c.tools, opts...)
 }
 
-func (c *GPTOSS20BClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream {
+func (c *GPTOSS20BClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelGPTOSS20B), prompt, c.systemPrompt, c.tools, opts...)
 }
 
@@ -235,7 +235,7 @@ func (c *GPTOSS120BClient) Prompt(ctx context.Context, prompt string, opts ...ll
 	return Prompt(ctx, c.apiKey, string(ModelGPTOSS120B), prompt, c.systemPrompt, c.tools, opts...)
 }
 
-func (c *GPTOSS120BClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream {
+func (c *GPTOSS120BClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelGPTOSS120B), prompt, c.systemPrompt, c.tools, opts...)
 }
 
@@ -266,7 +266,7 @@ func (c *Llama4Maverick17BInstructClient) Prompt(ctx context.Context, prompt str
 	return Prompt(ctx, c.apiKey, string(ModelLlama4Maverick17BInstruct), prompt, c.systemPrompt, c.tools, opts...)
 }
 
-func (c *Llama4Maverick17BInstructClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream {
+func (c *Llama4Maverick17BInstructClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelLlama4Maverick17BInstruct), prompt, c.systemPrompt, c.tools, opts...)
 }
 
@@ -297,7 +297,7 @@ func (c *Llama4Scout17BInstructClient) Prompt(ctx context.Context, prompt string
 	return Prompt(ctx, c.apiKey, string(ModelLlama4Scout17BInstruct), prompt, c.systemPrompt, c.tools, opts...)
 }
 
-func (c *Llama4Scout17BInstructClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream {
+func (c *Llama4Scout17BInstructClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelLlama4Scout17BInstruct), prompt, c.systemPrompt, c.tools, opts...)
 }
 
@@ -328,7 +328,7 @@ func (c *KimiK2Instruct0905Client) Prompt(ctx context.Context, prompt string, op
 	return Prompt(ctx, c.apiKey, string(ModelKimiK2Instruct0905), prompt, c.systemPrompt, c.tools, opts...)
 }
 
-func (c *KimiK2Instruct0905Client) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream {
+func (c *KimiK2Instruct0905Client) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelKimiK2Instruct0905), prompt, c.systemPrompt, c.tools, opts...)
 }
 
@@ -359,6 +359,6 @@ func (c *Qwen332BClient) Prompt(ctx context.Context, prompt string, opts ...llms
 	return Prompt(ctx, c.apiKey, string(ModelQwen332B), prompt, c.systemPrompt, c.tools, opts...)
 }
 
-func (c *Qwen332BClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream {
+func (c *Qwen332BClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelQwen332B), prompt, c.systemPrompt, c.tools, opts...)
 }

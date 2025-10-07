@@ -22,18 +22,22 @@ func PromptWithStream(
 	prompt *string,
 	systemPrompt llms.Message,
 	baseTools []llms.Tool,
-	opts ...llms.PromptOption,
+	opts ...llms.StreamingPromptOption,
 ) *Stream {
-	options := llms.PromptOptions{
-		Messages: []llms.Message{systemPrompt},
-		Tools:    slices.Clone(baseTools),
+	options := llms.StreamingPromptOptions{
+		GeneralPromptOptions: llms.GeneralPromptOptions{
+			BaseOptions: llms.BaseOptions{
+				Messages: []llms.Message{systemPrompt},
+			},
+			Tools: slices.Clone(baseTools),
+		},
 	}
 	for _, opt := range opts {
-		opt(&options)
+		opt.ApplyToStreaming(&options)
 	}
 
 	var messages []message
-	copier.Copy(&messages, options.Messages)
+	copier.Copy(&messages, options.BaseOptions.Messages)
 	if prompt != nil {
 		messages = append(messages, message{
 			Role:    llms.MessageRoleUser,
@@ -42,8 +46,8 @@ func PromptWithStream(
 	}
 
 	var tools []Tool
-	if options.Tools != nil {
-		copier.Copy(&tools, options.Tools)
+	if options.GeneralPromptOptions.Tools != nil {
+		copier.Copy(&tools, options.GeneralPromptOptions.Tools)
 	}
 
 	return &Stream{

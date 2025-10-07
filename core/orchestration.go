@@ -517,7 +517,7 @@ type LLM interface {
 }
 
 type LLMWithStream interface {
-	PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream
+	PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream
 }
 
 type SpeechToText interface {
