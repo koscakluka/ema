@@ -2,7 +2,6 @@ package orchestration
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -411,10 +410,6 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 	if err := copier.Copy(&threadMessages, messages); err != nil {
 		log.Printf("Failed to var copy messages: %v", err)
 	}
-	out, _ := json.MarshalIndent(messages, "", "  ")
-	log.Println(string(out))
-	out, _ = json.MarshalIndent(threadMessages, "", "  ")
-	log.Println(string(out))
 
 	firstRun := true
 	responses := []llms.Message{}
@@ -444,6 +439,8 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 			switch chunk.(type) {
 			// case llms.StreamRoleChunk:
 			// case llms.StreamReasoningChunk:
+			// case llms.StreamUsageChunk:
+			// 	chunk := chunk.(llms.StreamUsageChunk)
 			case llms.StreamContentChunk:
 				chunk := chunk.(llms.StreamContentChunk)
 
@@ -460,11 +457,6 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 
 			case llms.StreamToolCallChunk:
 				toolCalls = append(toolCalls, chunk.(llms.StreamToolCallChunk).ToolCall())
-			case llms.StreamUsageChunk:
-				chunk := chunk.(llms.StreamUsageChunk)
-
-				out, _ := json.MarshalIndent(chunk.Usage(), "", "  ")
-				log.Println(string(out))
 			}
 		}
 
