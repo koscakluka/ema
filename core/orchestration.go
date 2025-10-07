@@ -2,10 +2,14 @@ package orchestration
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 
 	"log"
 
+	"github.com/jinzhu/copier"
 	"github.com/koscakluka/ema/core/audio"
 	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/core/speechtotext"
@@ -216,24 +220,13 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				Content: transcript,
 			})
 
-			response, _ := o.llm.Prompt(context.TODO(), transcript,
-				llms.WithMessages(messages...),
-				llms.WithTools(o.tools...),
-				llms.WithStream(
-					func(data string) {
-						if o.canceled {
-							return
-						}
-
-						if o.orchestrateOptions.onResponse != nil {
-							o.orchestrateOptions.onResponse(data)
-						}
-						if o.textToSpeechClient != nil {
-							if err := o.textToSpeechClient.SendText(data); err != nil {
-								log.Printf("Failed to send text to deepgram: %v", err)
-							}
-						}
-					}))
+			var response []llms.Message
+			switch o.llm.(type) {
+			case LLMWithStream:
+				response, _ = o.processStreaming(ctx, transcript, messages)
+			default:
+				response = o.processPromptOld(ctx, transcript, messages)
+			}
 
 			o.messages = append(o.messages, response...)
 			if o.textToSpeechClient != nil {
@@ -388,8 +381,143 @@ func (o *Orchestrator) SetAlwaysRecording(isAlwaysRecording bool) {
 	o.AlwaysRecording = isAlwaysRecording
 }
 
+func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Message) []llms.Message {
+	response, _ := o.llm.Prompt(ctx, prompt,
+		llms.WithMessages(messages...),
+		llms.WithTools(o.tools...),
+		llms.WithStream(func(data string) {
+			if o.canceled {
+				return
+			}
+
+			if o.orchestrateOptions.onResponse != nil {
+				o.orchestrateOptions.onResponse(data)
+			}
+			if o.textToSpeechClient != nil {
+				if err := o.textToSpeechClient.SendText(data); err != nil {
+					log.Printf("Failed to send text to deepgram: %v", err)
+				}
+			}
+		}))
+	return response
+}
+
+func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, messages []llms.Message) ([]llms.Message, error) {
+	if o.llm.(LLMWithStream) == nil {
+		return nil, fmt.Errorf("LLM does not support streaming")
+	}
+	llm := o.llm.(LLMWithStream)
+	var threadMessages []llms.Message
+	if err := copier.Copy(&threadMessages, messages); err != nil {
+		log.Printf("Failed to var copy messages: %v", err)
+	}
+	out, _ := json.MarshalIndent(messages, "", "  ")
+	log.Println(string(out))
+	out, _ = json.MarshalIndent(threadMessages, "", "  ")
+	log.Println(string(out))
+
+	firstRun := true
+	responses := []llms.Message{}
+	for {
+		var prompt *string
+		if firstRun {
+			prompt = &originalPrompt
+			firstRun = false
+		}
+		stream := llm.PromptWithStream(context.TODO(), prompt,
+			llms.WithMessages(threadMessages...),
+			llms.WithTools(o.tools...),
+		)
+
+		var response strings.Builder
+		toolCalls := []llms.ToolCall{}
+		for chunk, err := range stream.Chunks {
+			if err != nil {
+				// TODO: handle error
+				break
+			}
+
+			if o.canceled {
+				return nil, nil
+			}
+
+			switch chunk.(type) {
+			// case llms.StreamRoleChunk:
+			// case llms.StreamReasoningChunk:
+			case llms.StreamContentChunk:
+				chunk := chunk.(llms.StreamContentChunk)
+
+				response.WriteString(chunk.Content())
+
+				if o.orchestrateOptions.onResponse != nil {
+					o.orchestrateOptions.onResponse(chunk.Content())
+				}
+				if o.textToSpeechClient != nil {
+					if err := o.textToSpeechClient.SendText(chunk.Content()); err != nil {
+						log.Printf("Failed to send text to deepgram: %v", err)
+					}
+				}
+
+			case llms.StreamToolCallChunk:
+				toolCalls = append(toolCalls, chunk.(llms.StreamToolCallChunk).ToolCall())
+			case llms.StreamUsageChunk:
+				chunk := chunk.(llms.StreamUsageChunk)
+
+				out, _ := json.MarshalIndent(chunk.Usage(), "", "  ")
+				log.Println(string(out))
+			}
+		}
+
+		responses = append(responses, llms.Message{
+			Role:      llms.MessageRoleAssistant,
+			ToolCalls: toolCalls,
+		})
+		threadMessages = append(threadMessages, llms.Message{
+			Role:      llms.MessageRoleAssistant,
+			ToolCalls: toolCalls,
+		})
+		for _, toolCall := range toolCalls {
+			response, _ := o.callTool(ctx, toolCall)
+			if response != nil {
+				threadMessages = append(threadMessages, *response)
+				responses = append(responses, *response)
+			}
+		}
+
+		if len(toolCalls) == 0 {
+			responses = append(responses, llms.Message{
+				Role:    llms.MessageRoleAssistant,
+				Content: response.String(),
+			})
+			return responses, nil
+		}
+	}
+}
+
+func (o *Orchestrator) callTool(_ context.Context, toolCall llms.ToolCall) (*llms.Message, error) {
+	for _, tool := range o.tools {
+		if tool.Function.Name == toolCall.Function.Name {
+			resp, err := tool.Execute(toolCall.Function.Arguments)
+			if err != nil {
+				log.Println("Error executing tool:", err)
+			}
+			return &llms.Message{
+				ToolCallID: toolCall.ID,
+				Role:       llms.MessageRoleTool,
+				Content:    resp,
+			}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("tool not found")
+}
+
 type LLM interface {
 	Prompt(ctx context.Context, prompt string, opts ...llms.PromptOption) ([]llms.Message, error)
+}
+
+type LLMWithStream interface {
+	PromptWithStream(ctx context.Context, prompt *string, opts ...llms.PromptOption) llms.Stream
 }
 
 type SpeechToText interface {
