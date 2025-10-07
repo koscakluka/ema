@@ -23,7 +23,7 @@ const (
 	chunkPrefix = "data:"
 )
 
-func PromptWithStream(
+func Prompt(
 	_ context.Context,
 	apiKey string,
 	model string,
@@ -196,8 +196,24 @@ type requestBody struct {
 type responseBody struct {
 	Choices []struct {
 		Delta struct {
-			Content   string     `json:"content"`
-			ToolCalls []toolCall `json:"tool_calls,omitempty"`
+			Role         string     `json:"role,omitempty"`
+			Content      string     `json:"content,omitempty"`
+			ToolCalls    []toolCall `json:"tool_calls,omitempty"`
+			Reasoning    string     `json:"reasoning,omitempty"`
+			Channel      string     `json:"channel,omitempty"`
+			FinishReason *string    `json:"finish_reason,omitempty"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Usage *struct {
+		QueueTime               float64 `json:"queue_time"`
+		PromptTokens            int     `json:"prompt_tokens"`
+		PromptTime              float64 `json:"prompt_time"`
+		CompletionTokens        int     `json:"completion_tokens"`
+		CompletionTime          float64 `json:"completion_time"`
+		TotalTokens             int     `json:"total_tokens"`
+		TotalTime               float64 `json:"total_time"`
+		CompletionTokensDetails *struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		}
+	} `json:"usage"`
 }

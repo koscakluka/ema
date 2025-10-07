@@ -10,10 +10,12 @@ type Message struct {
 type ToolCall struct {
 	ID       string
 	Type     string
-	Function struct {
-		Name      string
-		Arguments string
-	}
+	Function ToolCallFunction
+}
+
+type ToolCallFunction struct {
+	Name      string
+	Arguments string
 }
 
 type MessageRole string
