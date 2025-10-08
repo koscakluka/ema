@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"reflect"
 	"slices"
 
 	"os"
@@ -433,6 +434,14 @@ func main() {
 		log.Fatalf("Failed to create groq client: %v", err)
 	}
 
+	structuredLlm, err := groq.NewGPTOSS20BClient()
+	if err != nil {
+		log.Fatalf("Failed to create structured groq client: %v", err)
+	}
+	if !reflect.TypeOf(structuredLlm).Implements(reflect.TypeOf((*orchestration.InterruptionLLM)(nil)).Elem()) {
+		log.Fatalf("Structured groq client does not implement the interruption llm interface")
+	}
+
 	orchestrator := orchestration.NewOrchestrator(
 		orchestration.WithLLM(llm),
 		orchestration.WithSpeechToTextClient(deepgramClient),
@@ -440,6 +449,9 @@ func main() {
 		orchestration.WithAudioInput(audioClient),
 		orchestration.WithAudioOutput(audioClient),
 		orchestration.WithOrchestrationTools(),
+		orchestration.WithInterruptionClassifier(
+			orchestration.NewSimpleInterruptionClassifier(structuredLlm),
+		),
 	)
 
 	program = tea.NewProgram(
