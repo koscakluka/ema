@@ -208,6 +208,11 @@ func (c *GPTOSS20BClient) PromptWithStream(ctx context.Context, prompt *string, 
 	return PromptWithStream(ctx, c.apiKey, string(ModelGPTOSS20B), prompt, c.systemPrompt, c.tools, opts...)
 }
 
+func (c *GPTOSS20BClient) PromptWithStructure(ctx context.Context, prompt string, outputSchema any, opts ...llms.StructuredPromptOption) error {
+	_, err := PromptJSONSchema(ctx, c.apiKey, string(ModelGPTOSS20B), prompt, c.systemPrompt, outputSchema, opts...)
+	return err
+}
+
 type GPTOSS120BClient struct {
 	apiKey string
 
@@ -237,6 +242,11 @@ func (c *GPTOSS120BClient) Prompt(ctx context.Context, prompt string, opts ...ll
 
 func (c *GPTOSS120BClient) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelGPTOSS120B), prompt, c.systemPrompt, c.tools, opts...)
+}
+
+func (c *GPTOSS120BClient) PromptWithStructure(ctx context.Context, prompt string, outputSchema any, opts ...llms.StructuredPromptOption) error {
+	_, err := PromptJSONSchema(ctx, c.apiKey, string(ModelGPTOSS120B), prompt, c.systemPrompt, outputSchema, opts...)
+	return err
 }
 
 type Llama4Maverick17BInstructClient struct {
@@ -270,6 +280,11 @@ func (c *Llama4Maverick17BInstructClient) PromptWithStream(ctx context.Context, 
 	return PromptWithStream(ctx, c.apiKey, string(ModelLlama4Maverick17BInstruct), prompt, c.systemPrompt, c.tools, opts...)
 }
 
+func (c *Llama4Maverick17BInstructClient) PromptWithStructure(ctx context.Context, prompt string, outputSchema any, opts ...llms.StructuredPromptOption) error {
+	_, err := PromptJSONSchema(ctx, c.apiKey, string(ModelLlama4Maverick17BInstruct), prompt, c.systemPrompt, outputSchema, opts...)
+	return err
+}
+
 type Llama4Scout17BInstructClient struct {
 	apiKey string
 
@@ -301,6 +316,11 @@ func (c *Llama4Scout17BInstructClient) PromptWithStream(ctx context.Context, pro
 	return PromptWithStream(ctx, c.apiKey, string(ModelLlama4Scout17BInstruct), prompt, c.systemPrompt, c.tools, opts...)
 }
 
+func (c *Llama4Scout17BInstructClient) PromptWithStructure(ctx context.Context, prompt string, outputSchema any, opts ...llms.StructuredPromptOption) error {
+	_, err := PromptJSONSchema(ctx, c.apiKey, string(ModelLlama4Scout17BInstruct), prompt, c.systemPrompt, outputSchema, opts...)
+	return err
+}
+
 type KimiK2Instruct0905Client struct {
 	apiKey string
 
@@ -330,6 +350,11 @@ func (c *KimiK2Instruct0905Client) Prompt(ctx context.Context, prompt string, op
 
 func (c *KimiK2Instruct0905Client) PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream {
 	return PromptWithStream(ctx, c.apiKey, string(ModelKimiK2Instruct0905), prompt, c.systemPrompt, c.tools, opts...)
+}
+
+func (c *KimiK2Instruct0905Client) PromptWithStructure(ctx context.Context, prompt string, outputSchema any, opts ...llms.StructuredPromptOption) error {
+	_, err := PromptJSONSchema(ctx, c.apiKey, string(ModelKimiK2Instruct0905), prompt, c.systemPrompt, outputSchema, opts...)
+	return err
 }
 
 type Qwen332BClient struct {

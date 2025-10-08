@@ -27,6 +27,11 @@ type StreamingPromptOptions struct {
 	GeneralPromptOptions
 }
 
+type StructuredPromptOptions struct {
+	BaseOptions
+	PromptOptions
+}
+
 // PromptOption is a function that can be used to modify the prompt options.
 //
 // Deprecated: this type will be removed and replaced with a more specific
@@ -39,6 +44,10 @@ type GeneralPromptOption interface {
 
 type StreamingPromptOption interface {
 	ApplyToStreaming(*StreamingPromptOptions)
+}
+
+type StructuredPromptOption interface {
+	ApplyToStructured(*StructuredPromptOptions)
 }
 
 func (f PromptOption) ApplyToGeneral(o *GeneralPromptOptions) {
@@ -61,12 +70,24 @@ func (f PromptOption) ApplyToStreaming(o *StreamingPromptOptions) {
 	o.GeneralPromptOptions.ForcedToolsCall = o.PromptOptions.ForcedToolsCall
 }
 
+func (f PromptOption) ApplyToStructured(o *StructuredPromptOptions) {
+	o.PromptOptions.Messages = o.BaseOptions.Messages
+	f(&o.PromptOptions)
+	o.BaseOptions.Messages = o.PromptOptions.Messages
+}
+
+// WithStream is a PromptOption that sets the stream callback for the prompt.
+//
+// Deprecated: Use specialized streaming method instead of general one
 func WithStream(stream func(string)) PromptOption {
 	return func(opts *PromptOptions) {
 		opts.Stream = stream
 	}
 }
 
+// WithSystemPrompt is a PromptOption that sets the system prompt for the
+// prompt.
+// Repeating this option will overwrite the previous system prompt.
 func WithSystemPrompt(prompt string) PromptOption {
 	return func(opts *PromptOptions) {
 		if len(opts.Messages) == 0 {
@@ -85,18 +106,30 @@ func WithSystemPrompt(prompt string) PromptOption {
 	}
 }
 
+// WithMessages is a PromptOption that adds passed messages to the prompt.
+// Repeating this option will sequentially add more messages.
 func WithMessages(messages ...Message) PromptOption {
 	return func(opts *PromptOptions) {
 		opts.Messages = append(opts.Messages, messages...)
 	}
 }
 
+// WithTools is a PromptOption that adds tools to the prompt
+//
+// This option does nothing for structured prompts, it is depricated for use
+// there and will be disabled in the future
 func WithTools(tools ...Tool) PromptOption {
 	return func(opts *PromptOptions) {
 		opts.Tools = append(opts.Tools, tools...)
 	}
 }
 
+// WithForcedTools is a PromptOption that forces the use of tools in the prompt.
+// Note that any tool that is available can be used, not just the ones passed
+// into this option.
+//
+// This option does nothing for structured prompts, it is depricated for use
+// there and will be disabled in the future
 func WithForcedTools(tools ...Tool) PromptOption {
 	return func(opts *PromptOptions) {
 		opts.Tools = tools

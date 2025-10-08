@@ -110,7 +110,7 @@ func Prompt(
 			}
 
 			// log.Println("Chunk:", chunk)
-			var responseBody responseBody
+			var responseBody streamingResponseBody
 			err := json.Unmarshal([]byte(chunk), &responseBody)
 			if err != nil {
 				log.Println("Error unmarshalling JSON:", err)
@@ -193,7 +193,7 @@ type requestBody struct {
 	Tools      []Tool    `json:"tools,omitempty"`
 }
 
-type responseBody struct {
+type streamingResponseBody struct {
 	Choices []struct {
 		Delta struct {
 			Role         string     `json:"role,omitempty"`
