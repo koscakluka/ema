@@ -14,9 +14,9 @@ const sampleRate = 48000
 
 type Client struct {
 	audioContext *malgo.AllocatedContext
+	captureClient
 
-	pbDev  *malgo.Device
-	capDev *malgo.Device
+	pbDev *malgo.Device
 
 	leftoverAudio []byte
 
@@ -99,50 +99,29 @@ func NewClient() (*Client, error) {
 		log.Fatalf("Start playback failed: %v", err)
 	}
 
+	if err := client.captureClient.Init(audioCtx); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to initialize capture client: %w", err)
+	}
+
 	return &client, nil
 }
 
-func (c *Client) Stream(ctx context.Context, onAudio func(audio []byte)) error {
-	sampleRate := uint32(sampleRate)
-	channels := 1
-	format := malgo.FormatS16
-	bytesPerFrame := malgo.SampleSizeInBytes(format) * channels
+func (c *Client) Stream(_ context.Context, onAudio func(audio []byte)) error {
+	return c.captureClient.Start(onAudio)
+}
 
-	capCfg := malgo.DefaultDeviceConfig(malgo.Capture)
-	capCfg.SampleRate = sampleRate
-	capCfg.Capture.Format = format
-	capCfg.Capture.Channels = uint32(channels)
-	capCfg.Alsa.NoMMap = 1
-	capCfg.PerformanceProfile = malgo.LowLatency
-	capCfg.PeriodSizeInFrames = 480
-	capCfg.Periods = 3
+func (c *Client) StartCapture(_ context.Context, onAudio func(audio []byte)) error {
+	return c.captureClient.Start(onAudio)
+}
 
-	var err error
-	c.capDev, err = malgo.InitDevice(c.audioContext.Context, capCfg, malgo.DeviceCallbacks{
-		Data: func(_, pInput []byte, frameCount uint32) {
-			n := int(frameCount) * bytesPerFrame
-			if len(pInput) < n || n == 0 {
-				return
-			}
-			onAudio(pInput[:n])
-		},
-	})
-	if err != nil {
-		log.Fatalf("Init capture device failed: %v", err)
-		return err
-	}
-
-	if err := c.capDev.Start(); err != nil {
-		log.Fatalf("Start capture failed: %v", err)
-	}
-
-	return nil
+func (c *Client) StopCapture() error {
+	return c.captureClient.Stop()
 }
 
 func (c *Client) Close() {
-	if c.capDev != nil {
-		c.capDev.Uninit()
-	}
+	_ = c.captureClient.Uninit()
+
 	c.pbDev.Uninit()
 	_ = c.audioContext.Uninit()
 	c.audioContext.Free()
