@@ -16,9 +16,8 @@ import (
 )
 
 type Orchestrator struct {
-	AlwaysRecording bool
-	IsRecording     bool
-	IsSpeaking      bool
+	IsRecording bool
+	IsSpeaking  bool
 
 	messages []llms.Message
 
@@ -38,14 +37,15 @@ type Orchestrator struct {
 	interruptionClassifier InterruptionClassifier
 
 	orchestrateOptions OrchestrateOptions
+	config             *Config
 }
 
 func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 	o := &Orchestrator{
-		AlwaysRecording: false,
-		IsRecording:     false,
-		IsSpeaking:      false,
-		transcripts:     make(chan string, 10), // TODO: Figure out good valiues for this
+		IsRecording: false,
+		IsSpeaking:  false,
+		transcripts: make(chan string, 10), // TODO: Figure out good valiues for this
+		config:      &Config{AlwaysRecording: true},
 	}
 
 	for _, opt := range opts {
@@ -107,6 +107,16 @@ func WithOrchestrationTools() OrchestratorOption {
 func WithInterruptionClassifier(classifier InterruptionClassifier) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.interruptionClassifier = classifier
+	}
+}
+
+func WithConfig(config *Config) OrchestratorOption {
+	return func(o *Orchestrator) {
+		if config == nil {
+			return
+		}
+
+		o.config = config
 	}
 }
 
@@ -245,15 +255,16 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 	}()
 
 	if o.audioInput != nil && o.speechToTextClient != nil {
-		o.AlwaysRecording = true
 		go func() {
 			if fineAudioInput, ok := o.audioInput.(AudioInputFine); ok {
-				if err := fineAudioInput.StartCapture(ctx, func(audio []byte) {
-					if err := o.SendAudio(audio); err != nil {
-						log.Printf("Failed to send audio to speech to text client: %v", err)
+				if o.config.AlwaysRecording {
+					if err := fineAudioInput.StartCapture(ctx, func(audio []byte) {
+						if err := o.SendAudio(audio); err != nil {
+							log.Printf("Failed to send audio to speech to text client: %v", err)
+						}
+					}); err != nil {
+						log.Printf("Failed to start audio input streaming: %v", err)
 					}
-				}); err != nil {
-					log.Printf("Failed to start audio input streaming: %v", err)
 				}
 			} else {
 				if err := o.audioInput.Stream(ctx, func(audio []byte) {
@@ -372,7 +383,7 @@ func (o *Orchestrator) SendAudio(audio []byte) error {
 		return nil
 	}
 
-	if o.IsRecording || o.AlwaysRecording {
+	if o.IsRecording || o.config.AlwaysRecording {
 		return o.speechToTextClient.SendAudio(audio)
 	}
 
@@ -386,8 +397,12 @@ func (o *Orchestrator) SetSpeaking(isSpeaking bool) {
 	}
 }
 
+func (o *Orchestrator) IsAlwaysRecording() bool {
+	return o.config.AlwaysRecording
+}
+
 func (o *Orchestrator) SetAlwaysRecording(isAlwaysRecording bool) {
-	o.AlwaysRecording = isAlwaysRecording
+	o.config.AlwaysRecording = isAlwaysRecording
 
 	if isAlwaysRecording {
 		if fineAudioInput, ok := o.audioInput.(AudioInputFine); ok {
@@ -410,7 +425,7 @@ func (o *Orchestrator) SetAlwaysRecording(isAlwaysRecording bool) {
 func (o *Orchestrator) StartRecording() error {
 	o.IsRecording = true
 
-	if o.AlwaysRecording {
+	if o.config.AlwaysRecording {
 		return nil
 	}
 
@@ -429,7 +444,7 @@ func (o *Orchestrator) StartRecording() error {
 
 func (o *Orchestrator) StopRecording() error {
 	o.IsRecording = false
-	if o.AlwaysRecording {
+	if o.config.AlwaysRecording {
 		return nil
 	}
 

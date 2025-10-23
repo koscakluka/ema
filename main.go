@@ -162,7 +162,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 
 			case "l":
-				m.orchestrator.SetAlwaysRecording(!m.orchestrator.AlwaysRecording)
+				m.orchestrator.SetAlwaysRecording(!m.orchestrator.IsAlwaysRecording())
 
 			case "m":
 				m.orchestrator.SetSpeaking(!m.orchestrator.IsSpeaking)
@@ -357,7 +357,7 @@ func (m model) View() string {
 		label string
 		value string
 	}{
-		{label: "Recording", value: fmt.Sprintf("%v", m.orchestrator.IsRecording || m.orchestrator.AlwaysRecording)},
+		{label: "Recording", value: fmt.Sprintf("%v", m.orchestrator.IsRecording || m.orchestrator.IsAlwaysRecording())},
 		{label: "Automatic Scroll", value: fmt.Sprintf("%v", m.automaticScroll)},
 		{label: "Speaking", value: fmt.Sprintf("%v", m.speechDetected)},
 	} {
@@ -452,6 +452,7 @@ func main() {
 		orchestration.WithInterruptionClassifier(
 			orchestration.NewSimpleInterruptionClassifier(structuredLlm),
 		),
+		orchestration.WithConfig(&orchestration.Config{AlwaysRecording: false}),
 	)
 
 	program = tea.NewProgram(
