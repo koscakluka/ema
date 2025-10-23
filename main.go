@@ -141,7 +141,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			switch msg.String() {
 			case " ":
-				m.orchestrator.IsRecording = true
+				m.orchestrator.StartRecording()
 				if m.endRecordingTimer != nil {
 					if !m.endRecordingTimer.Stop() {
 						select {
@@ -171,7 +171,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case endRecordingMsg:
-		m.orchestrator.IsRecording = false
+		m.orchestrator.StopRecording()
 		m.endRecordingTimer = nil
 		return m, nil
 
