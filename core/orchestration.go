@@ -458,6 +458,10 @@ func (o *Orchestrator) StopRecording() error {
 	return nil
 }
 
+func (o *Orchestrator) Messages() []llms.Message {
+	return slices.Clone(o.messages)
+}
+
 func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Message) []llms.Message {
 	response, _ := o.llm.Prompt(ctx, prompt,
 		llms.WithMessages(messages...),
