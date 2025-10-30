@@ -14,10 +14,7 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 	// TODO: Check if this is still relevant (do we still have an active prompt)
 	switch t {
 	case InterruptionTypeContinuation:
-		o.canceled = true
-		if o.orchestrateOptions.onCancellation != nil {
-			o.orchestrateOptions.onCancellation()
-		}
+		o.Cancel()
 		lastPrompt := -1
 		for i := range o.messages {
 			if o.messages[i].Role == llms.MessageRoleUser {
@@ -32,17 +29,11 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 		o.messages = slices.Delete(o.messages, lastPrompt, len(o.messages))
 		return &prompt, nil
 	case InterruptionTypeClarification:
-		o.canceled = true
-		if o.orchestrateOptions.onCancellation != nil {
-			o.orchestrateOptions.onCancellation()
-		}
+		o.Cancel()
 		return &prompt, nil
 		// TODO: Properly passthrough the modified prompt
 	case InterruptionTypeCancellation:
-		o.canceled = true
-		if o.orchestrateOptions.onCancellation != nil {
-			o.orchestrateOptions.onCancellation()
-		}
+		o.Cancel()
 		return nil, nil
 	case InterruptionTypeIgnorable,
 		InterruptionTypeRepetition,
