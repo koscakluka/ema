@@ -443,7 +443,7 @@ func main() {
 	}
 
 	orchestrator := orchestration.NewOrchestrator(
-		orchestration.WithLLM(llm),
+		orchestration.WithStreamingLLM(llm),
 		orchestration.WithSpeechToTextClient(deepgramClient),
 		orchestration.WithTextToSpeechClient(deepgramSpeechClient),
 		orchestration.WithAudioInput(audioClient),

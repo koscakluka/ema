@@ -11,6 +11,9 @@ import (
 )
 
 func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) (passthrough *string, err error) {
+	// TODO: Take this out of the orchestrator and into a separate interuption
+	// handler
+
 	// TODO: Check if this is still relevant (do we still have an active prompt)
 	switch t {
 	case InterruptionTypeContinuation:
@@ -40,12 +43,32 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 		InterruptionTypeNoise:
 		return nil, nil
 	case InterruptionTypeAction:
-		if _, err := o.llm.Prompt(context.TODO(), prompt,
-			llms.WithForcedTools(o.tools...),
-			llms.WithMessages(o.messages...),
-		); err != nil {
-			// TODO: Retry?
-			return nil, fmt.Errorf("failed to call tool LLM: %w", err)
+		switch o.llm.(type) {
+		case LLMWithPrompt:
+			if _, err := o.llm.(LLMWithPrompt).Prompt(context.TODO(), prompt,
+				llms.WithForcedTools(o.tools...),
+				llms.WithMessages(o.messages...),
+			); err != nil {
+				// TODO: Retry?
+				return nil, fmt.Errorf("failed to call tool LLM: %w", err)
+			}
+		case LLMWithGeneralPrompt:
+			resp, err := o.llm.(LLMWithGeneralPrompt).Prompt(context.TODO(), prompt,
+				llms.WithForcedTools(o.tools...),
+				llms.WithMessages(o.messages...),
+			)
+			if err != nil {
+				// TODO: Retry?
+				return nil, fmt.Errorf("failed to call tool LLM: %w", err)
+			}
+
+			for _, toolCall := range resp.ToolCalls {
+				_, err := o.callTool(context.TODO(), toolCall)
+				if err != nil {
+					// TODO: Retry?
+					return nil, fmt.Errorf("failed to call tool: %w", err)
+				}
+			}
 		}
 		return nil, nil
 	case InterruptionTypeNewPrompt:
@@ -62,7 +85,7 @@ type SimpleInterruptionClassifier struct {
 	tools []llms.Tool
 }
 
-func NewSimpleInterruptionClassifier(llm LLM, opts ...InterruptionClassifierOption) *SimpleInterruptionClassifier {
+func NewSimpleInterruptionClassifier(llm LLMWithPrompt, opts ...InterruptionClassifierOption) *SimpleInterruptionClassifier {
 	classifier := &SimpleInterruptionClassifier{
 		llm: llm,
 	}
@@ -77,6 +100,18 @@ type InterruptionClassifierOption func(*SimpleInterruptionClassifier)
 func ClassifierWithTools(tools []llms.Tool) InterruptionClassifierOption {
 	return func(c *SimpleInterruptionClassifier) {
 		c.tools = tools
+	}
+}
+
+func ClassifierWithInterruptionLLM(llm InterruptionLLM) InterruptionClassifierOption {
+	return func(c *SimpleInterruptionClassifier) {
+		c.llm = llm
+	}
+}
+
+func ClassifierWithGeneralPromptLLM(llm LLMWithGeneralPrompt) InterruptionClassifierOption {
+	return func(c *SimpleInterruptionClassifier) {
+		c.llm = llm
 	}
 }
 
@@ -143,13 +178,38 @@ func (c SimpleInterruptionClassifier) Classify(prompt string, history []llms.Mes
 
 		classification = resp.Type
 
-	default:
+	case LLMWithGeneralPrompt:
 		systemPrompt := interruptionClassifierSystemPrompt
 		for _, tool := range append(c.tools, options.Tools...) {
 			systemPrompt += fmt.Sprintf("- %s: %s", tool.Function.Name, tool.Function.Description)
 		}
 
-		response, _ := c.llm.Prompt(context.TODO(), prompt,
+		response, _ := c.llm.(LLMWithGeneralPrompt).Prompt(context.TODO(), prompt,
+			llms.WithSystemPrompt(systemPrompt),
+			llms.WithMessages(history...),
+		)
+
+		if len(response.Content) == 0 {
+			return "", fmt.Errorf("no response from interruption classifier")
+		}
+
+		var unmarshalledResponse struct {
+			Classification string `json:"classification"`
+		}
+		if err := json.Unmarshal([]byte(response.Content), &unmarshalledResponse); err != nil {
+			// TODO: Retry
+			log.Printf("Failed to unmarshal interruption classification response: %v", err)
+			return "", nil
+		}
+		classification = unmarshalledResponse.Classification
+
+	case LLMWithPrompt:
+		systemPrompt := interruptionClassifierSystemPrompt
+		for _, tool := range append(c.tools, options.Tools...) {
+			systemPrompt += fmt.Sprintf("- %s: %s", tool.Function.Name, tool.Function.Description)
+		}
+
+		response, _ := c.llm.(LLMWithPrompt).Prompt(context.TODO(), prompt,
 			llms.WithSystemPrompt(systemPrompt),
 			llms.WithMessages(history...),
 		)
@@ -167,6 +227,7 @@ func (c SimpleInterruptionClassifier) Classify(prompt string, history []llms.Mes
 			return "", nil
 		}
 		classification = unmarshalledResponse.Classification
+
 	}
 
 	switch classification {

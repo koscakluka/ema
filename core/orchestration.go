@@ -54,7 +54,22 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 	}
 
 	if o.interruptionClassifier == nil {
-		o.interruptionClassifier = NewSimpleInterruptionClassifier(o.llm)
+		switch o.llm.(type) {
+		case LLMWithPrompt:
+			o.interruptionClassifier = NewSimpleInterruptionClassifier(o.llm.(LLMWithPrompt))
+		case InterruptionLLM:
+			// HACK: To avoid changing the signature of
+			// NewSimpleInterruptionClassifier we pass nil for LLM right now,
+			// when we change the whole classifier concept we can change the
+			// signature
+			o.interruptionClassifier = NewSimpleInterruptionClassifier(nil, ClassifierWithInterruptionLLM(o.llm.(InterruptionLLM)))
+		case LLMWithGeneralPrompt:
+			// HACK: To avoid changing the signature of
+			// NewSimpleInterruptionClassifier we pass nil for LLM right now,
+			// when we change the whole classifier concept we can change the
+			// signature
+			o.interruptionClassifier = NewSimpleInterruptionClassifier(nil, ClassifierWithGeneralPromptLLM(o.llm.(LLMWithGeneralPrompt)))
+		}
 	}
 
 	return o
@@ -62,7 +77,16 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 
 type OrchestratorOption func(*Orchestrator)
 
-func WithLLM(client LLM) OrchestratorOption {
+// WithLLM sets the LLM client for the orchestrator.
+//
+// Deprecated: use WithStreamingLLM instead
+func WithLLM(client LLMWithPrompt) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.llm = client
+	}
+}
+
+func WithStreamingLLM(client LLMWithStream) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.llm = client
 	}
@@ -234,8 +258,11 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 			switch o.llm.(type) {
 			case LLMWithStream:
 				response, _ = o.processStreaming(ctx, transcript, messages)
+			case LLMWithPrompt:
+				response, _ = o.processPromptOld(ctx, transcript, messages)
 			default:
-				response = o.processPromptOld(ctx, transcript, messages)
+				// Impossible state
+				continue
 			}
 
 			o.messages = append(o.messages, response...)
@@ -463,8 +490,12 @@ func (o *Orchestrator) Messages() []llms.Message {
 	return slices.Clone(o.messages)
 }
 
-func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Message) []llms.Message {
-	response, _ := o.llm.Prompt(ctx, prompt,
+func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Message) ([]llms.Message, error) {
+	if o.llm.(LLMWithPrompt) == nil {
+		return nil, fmt.Errorf("LLM does not support prompting")
+	}
+
+	response, _ := o.llm.(LLMWithPrompt).Prompt(ctx, prompt,
 		llms.WithMessages(messages...),
 		llms.WithTools(o.tools...),
 		llms.WithStream(func(data string) {
@@ -481,7 +512,7 @@ func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, mess
 				}
 			}
 		}))
-	return response
+	return response, nil
 }
 
 func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, messages []llms.Message) ([]llms.Message, error) {
@@ -587,11 +618,21 @@ func (o *Orchestrator) callTool(_ context.Context, toolCall llms.ToolCall) (*llm
 	return nil, fmt.Errorf("tool not found")
 }
 
-type LLM interface {
+type LLM any
+
+// Deprecated: use LLMWithGeneralPrompt instead
+type LLMWithPrompt interface {
+	LLM
 	Prompt(ctx context.Context, prompt string, opts ...llms.PromptOption) ([]llms.Message, error)
 }
 
+type LLMWithGeneralPrompt interface {
+	LLM
+	Prompt(ctx context.Context, prompt string, opts ...llms.GeneralPromptOption) (*llms.Message, error)
+}
+
 type LLMWithStream interface {
+	LLM
 	PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream
 }
 
