@@ -184,9 +184,13 @@ func (s *Stream) Chunks(yield func(llms.StreamChunk, error) bool) {
 		}
 
 		if responseBody.Usage != nil {
-			var details *llms.CompletionTokensDetails
+			var outputTokensDetails *llms.OutputTokensDetails
+			var completionTokensDetails *llms.CompletionTokensDetails
 			if responseBody.Usage.CompletionTokensDetails != nil {
-				details = utils.Ptr(llms.CompletionTokensDetails{
+				completionTokensDetails = utils.Ptr(llms.CompletionTokensDetails{
+					ReasoningTokens: responseBody.Usage.CompletionTokensDetails.ReasoningTokens,
+				})
+				outputTokensDetails = utils.Ptr(llms.OutputTokensDetails{
 					ReasoningTokens: responseBody.Usage.CompletionTokensDetails.ReasoningTokens,
 				})
 			}
@@ -194,14 +198,18 @@ func (s *Stream) Chunks(yield func(llms.StreamChunk, error) bool) {
 			if !yield(StreamUsageChunk{
 				finishReason: finishReason,
 				usage: llms.Usage{
-					QueueTime:               responseBody.Usage.QueueTime,
+					InputTokens:             responseBody.Usage.PromptTokens,
 					PromptTokens:            responseBody.Usage.PromptTokens,
-					PromptTime:              responseBody.Usage.PromptTime,
+					OutputTokens:            responseBody.Usage.CompletionTokens,
 					CompletionTokens:        responseBody.Usage.CompletionTokens,
-					CompletionTime:          responseBody.Usage.CompletionTime,
+					CompletionTokensDetails: completionTokensDetails,
+					OutputTokensDetails:     outputTokensDetails,
 					TotalTokens:             responseBody.Usage.TotalTokens,
-					TotalTime:               responseBody.Usage.TotalTime,
-					CompletionTokensDetails: details,
+
+					QueueTime:      responseBody.Usage.QueueTime,
+					PromptTime:     responseBody.Usage.PromptTime,
+					CompletionTime: responseBody.Usage.CompletionTime,
+					TotalTime:      responseBody.Usage.TotalTime,
 				},
 			}, nil) {
 				return
