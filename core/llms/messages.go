@@ -1,6 +1,13 @@
 package llms
 
-type Message struct {
+// Message is a single message in a conversation, but actually it represents a
+// single turn. It is just an alias for Turn for backwards compatibility.
+//
+// Deprecated: use Turn instead
+type Message Turn
+
+// Turn is a single turn taken in the conversation.
+type Turn struct {
 	Role       MessageRole
 	Content    string
 	ToolCallID string
