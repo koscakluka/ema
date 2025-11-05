@@ -24,7 +24,7 @@ type baseClient[T any] struct {
 	model        ChatModel
 	modelVersion T
 
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 func newBase[T any](model ChatModel, defaultModelVersion T, opts ...BaseOption[T]) (*baseClient[T], error) {
@@ -36,10 +36,7 @@ func newBase[T any](model ChatModel, defaultModelVersion T, opts ...BaseOption[T
 		model:        model,
 		modelVersion: defaultModelVersion,
 
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: defaultPrompt,
-		},
+		systemPrompt: defaultPrompt,
 	}
 
 	for _, opt := range opts {
@@ -57,10 +54,7 @@ type BaseOption[T any] func(*baseClient[T])
 
 func WithSystemPrompt[T any](prompt string) BaseOption[T] {
 	return func(c *baseClient[T]) {
-		c.systemPrompt = llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: prompt,
-		}
+		c.systemPrompt = prompt
 	}
 }
 

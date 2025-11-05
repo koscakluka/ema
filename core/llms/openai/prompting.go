@@ -17,21 +17,26 @@ func Prompt(
 	apiKey string,
 	model string,
 	prompt string,
-	systemPrompt llms.Message,
+	systemPrompt string,
 	opts ...llms.GeneralPromptOption,
 ) (*llms.Message, error) {
-	options := llms.GeneralPromptOptions{
-		BaseOptions: llms.BaseOptions{
-			Messages: []llms.Message{systemPrompt},
-		},
+	options := llms.GeneralPromptOptions{}
+	if systemPrompt != "" {
+		options.BaseOptions.Messages = append(options.BaseOptions.Messages, llms.Message{
+			Role: llms.MessageRoleSystem, Content: systemPrompt,
+		})
+		options.BaseOptions.Turns = append(options.BaseOptions.Turns, llms.Turn{
+			Role: llms.MessageRoleSystem, Content: systemPrompt,
+		})
 	}
+
 	for _, opt := range opts {
 		opt.ApplyToGeneral(&options)
 	}
 
 	messages := toOpenAIMessages(
-		append(options.BaseOptions.Messages,
-			llms.Message{
+		append(options.BaseOptions.Turns,
+			llms.Turn{
 				Role:    llms.MessageRoleUser,
 				Content: prompt,
 			},

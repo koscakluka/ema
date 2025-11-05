@@ -28,13 +28,20 @@ func Prompt(
 	apiKey string,
 	model string,
 	prompt string,
-	systemPrompt llms.Message,
+	systemPrompt string,
 	baseTools []llms.Tool,
 	opts ...llms.PromptOption,
 ) ([]llms.Message, error) {
 	options := llms.PromptOptions{
-		Messages: []llms.Message{systemPrompt},
-		Tools:    slices.Clone(baseTools),
+		Tools: slices.Clone(baseTools),
+	}
+	if systemPrompt != "" {
+		options.Messages = append(options.Messages, llms.Message{
+			Role: llms.MessageRoleSystem, Content: systemPrompt,
+		})
+		options.Turns = append(options.Turns, llms.Turn{
+			Role: llms.MessageRoleSystem, Content: systemPrompt,
+		})
 	}
 	for _, opt := range opts {
 		opt(&options)

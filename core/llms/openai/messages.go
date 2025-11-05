@@ -20,7 +20,7 @@ type openAIMessage struct {
 // Developer messages are lower priority than OpenAI (i.e. "System") messages.
 const MessageRoleDeveloper llms.MessageRole = "developer"
 
-func toOpenAIMessages(messages []llms.Message) []openAIMessage {
+func toOpenAIMessages(messages []llms.Turn) []openAIMessage {
 	var openaiMessages []openAIMessage
 	for _, msg := range messages {
 		openaiMessages = append(openaiMessages, toOpenAIMessage(msg)...)
@@ -28,7 +28,7 @@ func toOpenAIMessages(messages []llms.Message) []openAIMessage {
 	return openaiMessages
 }
 
-func toOpenAIMessage(msg llms.Message) []openAIMessage {
+func toOpenAIMessage(msg llms.Turn) []openAIMessage {
 	switch msg.Role {
 	case llms.MessageRoleSystem:
 		return []openAIMessage{{

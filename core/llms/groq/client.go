@@ -21,7 +21,7 @@ type Client struct {
 
 	model        string
 	tools        []llms.Tool
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 // NewClient is DEPRECATED, use individual model constructors
@@ -32,13 +32,10 @@ func NewClient(opts ...ClientOption) (*Client, error) {
 	}
 
 	return &Client{
-		apiKey: options.apiKey,
-		model:  options.model,
-		tools:  options.tools,
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: options.systemPrompt,
-		},
+		apiKey:       options.apiKey,
+		model:        options.model,
+		tools:        options.tools,
+		systemPrompt: options.systemPrompt,
 	}, nil
 }
 
@@ -119,7 +116,7 @@ type Llmaa3370BVersatileClient struct {
 	apiKey string
 
 	tools        []llms.Tool
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 func NewLlama3370BVersatileClient(opts ...ClientOption) (*Llmaa3370BVersatileClient, error) {
@@ -129,12 +126,9 @@ func NewLlama3370BVersatileClient(opts ...ClientOption) (*Llmaa3370BVersatileCli
 	}
 
 	return &Llmaa3370BVersatileClient{
-		apiKey: options.apiKey,
-		tools:  options.tools,
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: options.systemPrompt,
-		},
+		apiKey:       options.apiKey,
+		tools:        options.tools,
+		systemPrompt: options.systemPrompt,
 	}, nil
 }
 
@@ -150,7 +144,7 @@ type Llama318BInstructClient struct {
 	apiKey string
 
 	tools        []llms.Tool
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 func NewLlama318BInstructClient(opts ...ClientOption) (*Llama318BInstructClient, error) {
@@ -160,12 +154,9 @@ func NewLlama318BInstructClient(opts ...ClientOption) (*Llama318BInstructClient,
 	}
 
 	return &Llama318BInstructClient{
-		apiKey: options.apiKey,
-		tools:  options.tools,
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: options.systemPrompt,
-		},
+		apiKey:       options.apiKey,
+		tools:        options.tools,
+		systemPrompt: options.systemPrompt,
 	}, nil
 }
 
@@ -181,7 +172,7 @@ type GPTOSS20BClient struct {
 	apiKey string
 
 	tools        []llms.Tool
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 func NewGPTOSS20BClient(opts ...ClientOption) (*GPTOSS20BClient, error) {
@@ -191,12 +182,9 @@ func NewGPTOSS20BClient(opts ...ClientOption) (*GPTOSS20BClient, error) {
 	}
 
 	return &GPTOSS20BClient{
-		apiKey: options.apiKey,
-		tools:  options.tools,
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: options.systemPrompt,
-		},
+		apiKey:       options.apiKey,
+		tools:        options.tools,
+		systemPrompt: options.systemPrompt,
 	}, nil
 }
 
@@ -217,7 +205,7 @@ type GPTOSS120BClient struct {
 	apiKey string
 
 	tools        []llms.Tool
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 func NewGPTOSS120BClient(opts ...ClientOption) (*GPTOSS120BClient, error) {
@@ -227,12 +215,9 @@ func NewGPTOSS120BClient(opts ...ClientOption) (*GPTOSS120BClient, error) {
 	}
 
 	return &GPTOSS120BClient{
-		apiKey: options.apiKey,
-		tools:  options.tools,
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: options.systemPrompt,
-		},
+		apiKey:       options.apiKey,
+		tools:        options.tools,
+		systemPrompt: options.systemPrompt,
 	}, nil
 }
 
@@ -253,7 +238,7 @@ type Llama4Maverick17BInstructClient struct {
 	apiKey string
 
 	tools        []llms.Tool
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 func NewLlama4Maverick17BInstructClient(opts ...ClientOption) (*Llama4Maverick17BInstructClient, error) {
@@ -263,12 +248,9 @@ func NewLlama4Maverick17BInstructClient(opts ...ClientOption) (*Llama4Maverick17
 	}
 
 	return &Llama4Maverick17BInstructClient{
-		apiKey: options.apiKey,
-		tools:  options.tools,
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: options.systemPrompt,
-		},
+		apiKey:       options.apiKey,
+		tools:        options.tools,
+		systemPrompt: options.systemPrompt,
 	}, nil
 }
 
@@ -289,7 +271,7 @@ type Llama4Scout17BInstructClient struct {
 	apiKey string
 
 	tools        []llms.Tool
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 func NewLlama4Scout17BInstructClient(opts ...ClientOption) (*Llama4Scout17BInstructClient, error) {
@@ -299,12 +281,9 @@ func NewLlama4Scout17BInstructClient(opts ...ClientOption) (*Llama4Scout17BInstr
 	}
 
 	return &Llama4Scout17BInstructClient{
-		apiKey: options.apiKey,
-		tools:  options.tools,
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: options.systemPrompt,
-		},
+		apiKey:       options.apiKey,
+		tools:        options.tools,
+		systemPrompt: options.systemPrompt,
 	}, nil
 }
 
@@ -325,7 +304,7 @@ type KimiK2Instruct0905Client struct {
 	apiKey string
 
 	tools        []llms.Tool
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 func NewKimiK2Instruct0905Client(opts ...ClientOption) (*KimiK2Instruct0905Client, error) {
@@ -335,12 +314,9 @@ func NewKimiK2Instruct0905Client(opts ...ClientOption) (*KimiK2Instruct0905Clien
 	}
 
 	return &KimiK2Instruct0905Client{
-		apiKey: options.apiKey,
-		tools:  options.tools,
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: options.systemPrompt,
-		},
+		apiKey:       options.apiKey,
+		tools:        options.tools,
+		systemPrompt: options.systemPrompt,
 	}, nil
 }
 
@@ -361,7 +337,7 @@ type Qwen332BClient struct {
 	apiKey string
 
 	tools        []llms.Tool
-	systemPrompt llms.Message
+	systemPrompt string
 }
 
 func NewQwen332BClient(opts ...ClientOption) (*Qwen332BClient, error) {
@@ -371,12 +347,9 @@ func NewQwen332BClient(opts ...ClientOption) (*Qwen332BClient, error) {
 	}
 
 	return &Qwen332BClient{
-		apiKey: options.apiKey,
-		tools:  options.tools,
-		systemPrompt: llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: options.systemPrompt,
-		},
+		apiKey:       options.apiKey,
+		tools:        options.tools,
+		systemPrompt: options.systemPrompt,
 	}, nil
 }
 

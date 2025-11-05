@@ -20,17 +20,22 @@ func PromptWithStream(
 	apiKey string,
 	model string,
 	prompt *string,
-	systemPrompt llms.Message,
+	systemPrompt string,
 	baseTools []llms.Tool,
 	opts ...llms.StreamingPromptOption,
 ) *Stream {
 	options := llms.StreamingPromptOptions{
 		GeneralPromptOptions: llms.GeneralPromptOptions{
-			BaseOptions: llms.BaseOptions{
-				Messages: []llms.Message{systemPrompt},
-			},
 			Tools: slices.Clone(baseTools),
 		},
+	}
+	if systemPrompt != "" {
+		options.BaseOptions.Messages = append(options.BaseOptions.Messages, llms.Message{
+			Role: llms.MessageRoleSystem, Content: systemPrompt,
+		})
+		options.BaseOptions.Turns = append(options.BaseOptions.Turns, llms.Turn{
+			Role: llms.MessageRoleSystem, Content: systemPrompt,
+		})
 	}
 	for _, opt := range opts {
 		opt.ApplyToStreaming(&options)
