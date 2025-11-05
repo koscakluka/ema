@@ -20,7 +20,7 @@ type Orchestrator struct {
 	IsRecording bool
 	IsSpeaking  bool
 
-	messages []llms.Message
+	turns []llms.Turn
 
 	transcripts  chan string
 	activePrompt *string
@@ -248,13 +248,13 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 			o.activePrompt = &transcript
 			o.promptEnded.Add(1)
 
-			messages := o.messages
-			o.messages = append(o.messages, llms.Message{
+			messages := o.turns
+			o.turns = append(o.turns, llms.Turn{
 				Role:    llms.MessageRoleUser,
 				Content: transcript,
 			})
 
-			var response []llms.Message
+			var response []llms.Turn
 			switch o.llm.(type) {
 			case LLMWithStream:
 				response, _ = o.processStreaming(ctx, transcript, messages)
@@ -265,7 +265,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				continue
 			}
 
-			o.messages = append(o.messages, response...)
+			o.turns = append(o.turns, response...)
 			if o.textToSpeechClient != nil {
 				if err := o.textToSpeechClient.FlushBuffer(); err != nil {
 					log.Printf("Failed to flush buffer: %v", err)
@@ -384,7 +384,9 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 	passthrough := &prompt
 	if o.interruption {
 		if o.interruptionClassifier != nil {
-			interruption, err := o.interruptionClassifier.Classify(prompt, o.messages, ClassifyWithTools(o.tools))
+			var msgs []llms.Message
+			copier.Copy(&msgs, &o.turns)
+			interruption, err := o.interruptionClassifier.Classify(prompt, msgs, ClassifyWithTools(o.tools))
 			if err != nil {
 				// TODO: Retry?
 				log.Printf("Failed to classify interruption: %v", err)
@@ -487,16 +489,22 @@ func (o *Orchestrator) StopRecording() error {
 }
 
 func (o *Orchestrator) Messages() []llms.Message {
-	return slices.Clone(o.messages)
+	var msgs []llms.Message
+	copier.Copy(msgs, o.turns)
+	return msgs
 }
 
-func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Message) ([]llms.Message, error) {
+func (o *Orchestrator) Turns() []llms.Turn {
+	return slices.Clone(o.turns)
+}
+
+func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Turn) ([]llms.Turn, error) {
 	if o.llm.(LLMWithPrompt) == nil {
 		return nil, fmt.Errorf("LLM does not support prompting")
 	}
 
 	response, _ := o.llm.(LLMWithPrompt).Prompt(ctx, prompt,
-		llms.WithMessages(messages...),
+		llms.WithTurns(messages...),
 		llms.WithTools(o.tools...),
 		llms.WithStream(func(data string) {
 			if o.canceled {
@@ -511,22 +519,27 @@ func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, mess
 					log.Printf("Failed to send text to deepgram: %v", err)
 				}
 			}
-		}))
-	return response, nil
+		}),
+	)
+
+	// TODO: Technically, this should return a single turn!
+	var turns []llms.Turn
+	copier.Copy(&turns, response)
+	return turns, nil
 }
 
-func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, messages []llms.Message) ([]llms.Message, error) {
+func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, messages []llms.Turn) ([]llms.Turn, error) {
 	if o.llm.(LLMWithStream) == nil {
 		return nil, fmt.Errorf("LLM does not support streaming")
 	}
 	llm := o.llm.(LLMWithStream)
-	var threadMessages []llms.Message
-	if err := copier.Copy(&threadMessages, messages); err != nil {
+	var turns []llms.Turn
+	if err := copier.Copy(&turns, messages); err != nil {
 		log.Printf("Failed to var copy messages: %v", err)
 	}
 
 	firstRun := true
-	responses := []llms.Message{}
+	responses := []llms.Turn{}
 	for {
 		var prompt *string
 		if firstRun {
@@ -534,7 +547,7 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 			firstRun = false
 		}
 		stream := llm.PromptWithStream(context.TODO(), prompt,
-			llms.WithMessages(threadMessages...),
+			llms.WithTurns(turns...),
 			llms.WithTools(o.tools...),
 		)
 
@@ -574,24 +587,24 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 			}
 		}
 
-		responses = append(responses, llms.Message{
+		responses = append(responses, llms.Turn{
 			Role:      llms.MessageRoleAssistant,
 			ToolCalls: toolCalls,
 		})
-		threadMessages = append(threadMessages, llms.Message{
+		turns = append(turns, llms.Turn{
 			Role:      llms.MessageRoleAssistant,
 			ToolCalls: toolCalls,
 		})
 		for _, toolCall := range toolCalls {
 			response, _ := o.callTool(ctx, toolCall)
 			if response != nil {
-				threadMessages = append(threadMessages, *response)
+				turns = append(turns, *response)
 				responses = append(responses, *response)
 			}
 		}
 
 		if len(toolCalls) == 0 {
-			responses = append(responses, llms.Message{
+			responses = append(responses, llms.Turn{
 				Role:    llms.MessageRoleAssistant,
 				Content: response.String(),
 			})
@@ -600,14 +613,14 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 	}
 }
 
-func (o *Orchestrator) callTool(_ context.Context, toolCall llms.ToolCall) (*llms.Message, error) {
+func (o *Orchestrator) callTool(_ context.Context, toolCall llms.ToolCall) (*llms.Turn, error) {
 	for _, tool := range o.tools {
 		if tool.Function.Name == toolCall.Function.Name {
 			resp, err := tool.Execute(toolCall.Function.Arguments)
 			if err != nil {
 				log.Println("Error executing tool:", err)
 			}
-			return &llms.Message{
+			return &llms.Turn{
 				ToolCallID: toolCall.ID,
 				Role:       llms.MessageRoleTool,
 				Content:    resp,

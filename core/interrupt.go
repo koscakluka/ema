@@ -19,8 +19,8 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 	case InterruptionTypeContinuation:
 		o.Cancel()
 		lastPrompt := -1
-		for i := range o.messages {
-			if o.messages[i].Role == llms.MessageRoleUser {
+		for i := range o.turns {
+			if o.turns[i].Role == llms.MessageRoleUser {
 				lastPrompt = i
 				break
 			}
@@ -28,8 +28,8 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 		if lastPrompt == -1 {
 			return &prompt, nil
 		}
-		prompt = o.messages[lastPrompt].Content + " " + prompt
-		o.messages = slices.Delete(o.messages, lastPrompt, len(o.messages))
+		prompt = o.turns[lastPrompt].Content + " " + prompt
+		o.turns = slices.Delete(o.turns, lastPrompt, len(o.turns))
 		return &prompt, nil
 	case InterruptionTypeClarification:
 		o.Cancel()
@@ -47,7 +47,7 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 		case LLMWithPrompt:
 			if _, err := o.llm.(LLMWithPrompt).Prompt(context.TODO(), prompt,
 				llms.WithForcedTools(o.tools...),
-				llms.WithMessages(o.messages...),
+				llms.WithTurns(o.turns...),
 			); err != nil {
 				// TODO: Retry?
 				return nil, fmt.Errorf("failed to call tool LLM: %w", err)
@@ -55,7 +55,7 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 		case LLMWithGeneralPrompt:
 			resp, err := o.llm.(LLMWithGeneralPrompt).Prompt(context.TODO(), prompt,
 				llms.WithForcedTools(o.tools...),
-				llms.WithMessages(o.messages...),
+				llms.WithTurns(o.turns...),
 			)
 			if err != nil {
 				// TODO: Retry?
