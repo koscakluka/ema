@@ -642,6 +642,22 @@ func (o *Orchestrator) CallTool(_ context.Context, toolCall llms.ToolCall) (*llm
 	return nil, fmt.Errorf("tool not found")
 }
 
+func (o *Orchestrator) CallToolWithPrompt(ctx context.Context, prompt string) error {
+	switch o.llm.(type) {
+	case LLMWithStream:
+		_, err := o.processStreaming(ctx, prompt, o.turns)
+		return err
+
+	case LLMWithPrompt:
+		_, err := o.processPromptOld(ctx, prompt, o.turns)
+		return err
+
+	default:
+		// Impossible state technically
+		return fmt.Errorf("unknown LLM type")
+	}
+}
+
 type LLM any
 
 // Deprecated: use LLMWithGeneralPrompt instead
