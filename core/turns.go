@@ -18,11 +18,14 @@ func (t *Turns) Push(turn llms.Turn) {
 	*t = append(*t, turn)
 }
 
-// Pop removes the last turn from the stored turns
-func (t *Turns) Pop() llms.Turn {
+// Pop removes the last turn from the stored turns, returns nil if empty
+func (t *Turns) Pop() *llms.Turn {
+	if len(*t) == 0 {
+		return nil
+	}
 	turn := (*t)[len(*t)-1]
 	*t = (*t)[:len(*t)-1]
-	return turn
+	return &turn
 }
 
 // Clear removes all stored turns
