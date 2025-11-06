@@ -10,6 +10,9 @@ import (
 	"github.com/koscakluka/ema/core/llms"
 )
 
+// respondToInterruption
+//
+// Deprecated: Use the InterruptionHandler interface instead of relaying on this
 func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) (passthrough *string, err error) {
 	// TODO: Take this out of the orchestrator and into a separate interuption
 	// handler
@@ -85,6 +88,10 @@ type SimpleInterruptionClassifier struct {
 	tools []llms.Tool
 }
 
+// NewSimpleInterruptionClassifier creates a new SimpleInterruptionClassifier
+// used to classify the type of interruption a prompt is.
+//
+// Deprecated: use InterruptionHandlers instead
 func NewSimpleInterruptionClassifier(llm LLMWithPrompt, opts ...InterruptionClassifierOption) *SimpleInterruptionClassifier {
 	classifier := &SimpleInterruptionClassifier{
 		llm: llm,

@@ -11,6 +11,7 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/koscakluka/ema/core/audio"
 	emaContext "github.com/koscakluka/ema/core/context"
+	"github.com/koscakluka/ema/core/interruptions"
 	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/core/speechtotext"
 	"github.com/koscakluka/ema/core/texttospeech"
@@ -36,6 +37,7 @@ type Orchestrator struct {
 	audioInput             AudioInput
 	audioOutput            AudioOutput
 	interruptionClassifier InterruptionClassifier
+	interruptionHandler    InterruptionHandlerV0
 
 	orchestrateOptions OrchestrateOptions
 	config             *Config
@@ -129,9 +131,20 @@ func WithOrchestrationTools() OrchestratorOption {
 	}
 }
 
+// WithInterruptionClassifier sets the interruption classifier that is used
+// internally to classify interruptions types so orchestrator can respond to
+// them.
+//
+// Deprecated: use WithInterruptionHandler instead
 func WithInterruptionClassifier(classifier InterruptionClassifier) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.interruptionClassifier = classifier
+	}
+}
+
+func WithInterruptionHandlerV0(handler InterruptionHandlerV0) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.interruptionHandler = handler
 	}
 }
 
@@ -383,7 +396,14 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 
 	passthrough := &prompt
 	if o.interruption {
-		if o.interruptionClassifier != nil {
+		if o.interruptionHandler != nil {
+			if err := o.interruptionHandler.HandleV0(prompt, o.turns, o.tools, o); err != nil {
+				log.Printf("Failed to handle interruption: %v", err)
+			} else {
+				o.interruption = false
+				return
+			}
+		} else if o.interruptionClassifier != nil {
 			var msgs []llms.Message
 			copier.Copy(&msgs, &o.turns)
 			interruption, err := o.interruptionClassifier.Classify(prompt, msgs, ClassifyWithTools(o.tools))
@@ -400,9 +420,6 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 		o.interruption = false
 	}
 	if passthrough != nil {
-		if o.orchestrateOptions.onTranscription != nil {
-			o.orchestrateOptions.onTranscription(prompt)
-		}
 		o.queuePrompt(*passthrough)
 	}
 }
@@ -428,6 +445,9 @@ func (o *Orchestrator) QueuePrompt(prompt string) {
 }
 
 func (o *Orchestrator) queuePrompt(prompt string) {
+	if o.orchestrateOptions.onTranscription != nil {
+		o.orchestrateOptions.onTranscription(prompt)
+	}
 	o.transcripts <- prompt
 }
 
@@ -707,4 +727,8 @@ type AudioOutput interface {
 
 type InterruptionClassifier interface {
 	Classify(prompt string, history []llms.Message, opts ...ClassifyOption) (interruptionType, error)
+}
+
+type InterruptionHandlerV0 interface {
+	HandleV0(prompt string, turns []llms.Turn, tools []llms.Tool, orchestrator interruptions.OrchestratorV0) error
 }
