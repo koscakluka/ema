@@ -2,7 +2,7 @@ package context
 
 import "github.com/koscakluka/ema/core/llms"
 
-type Turns interface {
+type TurnsV0 interface {
 	Peek() *llms.Turn
 	Push(turn llms.Turn)
 	Pop() *llms.Turn
