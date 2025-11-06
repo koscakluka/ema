@@ -10,6 +10,7 @@ import (
 
 	"github.com/jinzhu/copier"
 	"github.com/koscakluka/ema/core/audio"
+	emaContext "github.com/koscakluka/ema/core/context"
 	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/core/speechtotext"
 	"github.com/koscakluka/ema/core/texttospeech"
@@ -504,7 +505,7 @@ func (o *Orchestrator) Messages() []llms.Message {
 	return msgs
 }
 
-func (o *Orchestrator) Turns() *Turns {
+func (o *Orchestrator) Turns() emaContext.TurnsV0 {
 	return &o.turns
 }
 
