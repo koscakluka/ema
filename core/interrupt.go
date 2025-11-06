@@ -63,7 +63,7 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 			}
 
 			for _, toolCall := range resp.ToolCalls {
-				_, err := o.callTool(context.TODO(), toolCall)
+				_, err := o.CallTool(context.TODO(), toolCall)
 				if err != nil {
 					// TODO: Retry?
 					return nil, fmt.Errorf("failed to call tool: %w", err)

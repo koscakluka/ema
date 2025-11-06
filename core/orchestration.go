@@ -402,7 +402,7 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 		if o.orchestrateOptions.onTranscription != nil {
 			o.orchestrateOptions.onTranscription(prompt)
 		}
-		o.transcripts <- *passthrough
+		o.queuePrompt(*passthrough)
 	}
 }
 
@@ -417,6 +417,17 @@ func (o *Orchestrator) SendAudio(audio []byte) error {
 	}
 
 	return nil
+}
+
+// QueuePrompt immediately queues the prompt for processing after the current
+// turn is finished. It bypasses the normal processing pipeline and can be useful
+// for handling prompts that are sure to follow up after the current turn.
+func (o *Orchestrator) QueuePrompt(prompt string) {
+	go o.queuePrompt(prompt)
+}
+
+func (o *Orchestrator) queuePrompt(prompt string) {
+	o.transcripts <- prompt
 }
 
 func (o *Orchestrator) SetSpeaking(isSpeaking bool) {
@@ -595,7 +606,7 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 			ToolCalls: toolCalls,
 		})
 		for _, toolCall := range toolCalls {
-			response, _ := o.callTool(ctx, toolCall)
+			response, _ := o.CallTool(ctx, toolCall)
 			if response != nil {
 				turns = append(turns, *response)
 				responses = append(responses, *response)
@@ -612,7 +623,7 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 	}
 }
 
-func (o *Orchestrator) callTool(_ context.Context, toolCall llms.ToolCall) (*llms.Turn, error) {
+func (o *Orchestrator) CallTool(_ context.Context, toolCall llms.ToolCall) (*llms.Turn, error) {
 	for _, tool := range o.tools {
 		if tool.Function.Name == toolCall.Function.Name {
 			resp, err := tool.Execute(toolCall.Function.Arguments)
