@@ -3,7 +3,6 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 
@@ -20,7 +19,7 @@ type Orchestrator struct {
 	IsRecording bool
 	IsSpeaking  bool
 
-	turns []llms.Turn
+	turns Turns
 
 	transcripts  chan string
 	activePrompt *string
@@ -494,8 +493,8 @@ func (o *Orchestrator) Messages() []llms.Message {
 	return msgs
 }
 
-func (o *Orchestrator) Turns() []llms.Turn {
-	return slices.Clone(o.turns)
+func (o *Orchestrator) Turns() *Turns {
+	return &o.turns
 }
 
 func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Turn) ([]llms.Turn, error) {
