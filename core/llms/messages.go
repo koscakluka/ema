@@ -33,6 +33,8 @@ type Turn struct {
 	Content   string
 	ToolCalls []ToolCall
 
+	Cancelled bool
+
 	// ToolCallID is the ID of the tool call that this turn is responding to
 	//
 	// Deprecated: The response is now a ToolCall property, this is only here
