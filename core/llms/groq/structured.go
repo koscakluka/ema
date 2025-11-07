@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/invopop/jsonschema"
-	"github.com/jinzhu/copier"
 	"github.com/koscakluka/ema/core/llms"
 )
 
@@ -30,13 +29,15 @@ func PromptJSONSchema[T any](
 			Role:    llms.MessageRoleSystem,
 			Content: systemPrompt,
 		})
+		options.BaseOptions.Turns = append(options.BaseOptions.Turns, llms.Turn{
+			Role: llms.MessageRoleSystem, Content: systemPrompt,
+		})
 	}
 	for _, opt := range opts {
 		opt.ApplyToStructured(&options)
 	}
 
-	var messages []message
-	copier.Copy(&messages, options.BaseOptions.Messages)
+	messages := toMessages(options.BaseOptions.Turns)
 	messages = append(messages, message{
 		Role:    llms.MessageRoleUser,
 		Content: prompt,

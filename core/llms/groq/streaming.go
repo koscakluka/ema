@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -41,14 +42,14 @@ func PromptWithStream(
 		opt.ApplyToStreaming(&options)
 	}
 
-	var messages []message
-	copier.Copy(&messages, options.BaseOptions.Messages)
+	messages := toMessages(options.BaseOptions.Turns)
 	if prompt != nil {
 		messages = append(messages, message{
 			Role:    llms.MessageRoleUser,
 			Content: *prompt,
 		})
 	}
+	log.Println("Messages:", messages)
 
 	var tools []Tool
 	if options.GeneralPromptOptions.Tools != nil {

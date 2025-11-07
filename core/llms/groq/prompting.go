@@ -32,6 +32,10 @@ func Prompt(
 	baseTools []llms.Tool,
 	opts ...llms.PromptOption,
 ) ([]llms.Message, error) {
+	// TODO: Split this and other prompting methods into raw and typed
+	// variants
+	// Name this method to Respond, GenerateResponse or RespondTo + version
+
 	options := llms.PromptOptions{
 		Tools: slices.Clone(baseTools),
 	}
@@ -47,8 +51,7 @@ func Prompt(
 		opt(&options)
 	}
 
-	var messages []message
-	copier.Copy(&messages, options.Messages)
+	messages := toMessages(options.Turns)
 	messages = append(messages, message{
 		Role:    llms.MessageRoleUser,
 		Content: prompt,
@@ -65,7 +68,7 @@ func Prompt(
 		copier.Copy(&tools, options.Tools)
 	}
 
-	responses := []message{}
+	responses := []llms.Message{}
 
 	for {
 		reqBody := requestBody{
@@ -141,12 +144,22 @@ func Prompt(
 			log.Println("Error reading streamed response:", err)
 		}
 
-		msg := message{
+		messages = append(messages, message{
 			Role:      llms.MessageRoleAssistant,
 			Content:   response.String(),
 			ToolCalls: toolCalls,
+		})
+		msg := llms.Message{
+			Role:    llms.MessageRoleAssistant,
+			Content: response.String(),
 		}
-		messages = append(messages, msg)
+		for _, toolCall := range toolCalls {
+			msg.ToolCalls = append(msg.ToolCalls, llms.ToolCall{
+				ID:       toolCall.ID,
+				Type:     toolCall.Type,
+				Function: llms.ToolCallFunction{Name: toolCall.Function.Name, Arguments: toolCall.Function.Arguments},
+			})
+		}
 		responses = append(responses, msg)
 		if len(toolCalls) == 0 {
 			llmResponses := []llms.Message{}
@@ -161,35 +174,22 @@ func Prompt(
 					if err != nil {
 						log.Println("Error executing tool:", err)
 					}
-					msg := message{
+					messages = append(messages, message{
 						ToolCallID: toolCall.ID,
 						Role:       llms.MessageRoleTool,
 						Content:    resp,
-					}
-					messages = append(messages, msg)
-					responses = append(responses, msg)
+					})
+					responses = append(responses, llms.Message{
+						ToolCallID: toolCall.ID,
+						Role:       llms.MessageRoleTool,
+						Content:    resp,
+					})
 				}
 			}
 
 		}
 
 	}
-}
-
-type message struct {
-	ToolCallID string           `json:"tool_call_id,omitempty"`
-	Role       llms.MessageRole `json:"role"`
-	Content    string           `json:"content"`
-	ToolCalls  []toolCall       `json:"tool_calls,omitempty"`
-}
-
-type toolCall struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
 }
 
 type requestBody struct {
