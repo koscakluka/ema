@@ -3,10 +3,10 @@ package openai
 import "github.com/koscakluka/ema/core/llms"
 
 type openAIMessage struct {
-	Type string `json:"type"`
+	Type messageType `json:"type"`
 
-	Role    llms.MessageRole `json:"role,omitempty"`
-	Content string           `json:"content,omitempty"`
+	Role    messageRole `json:"role,omitempty"`
+	Content string      `json:"content,omitempty"`
 
 	ToolCallID        string `json:"call_id,omitempty"`
 	ToolCallName      string `json:"name,omitempty"`
@@ -15,60 +15,74 @@ type openAIMessage struct {
 	ToolCallStatus    string `json:"status,omitempty"`
 }
 
-// MessageRoleDeveloper is a special role used by OpenAI that makes a difference
-// between OpenAI defined message and developer defined message.
-// Developer messages are lower priority than OpenAI (i.e. "System") messages.
-const MessageRoleDeveloper llms.MessageRole = "developer"
+type messageRole string
 
-func toOpenAIMessages(messages []llms.Turn) []openAIMessage {
-	var openaiMessages []openAIMessage
-	for _, msg := range messages {
-		openaiMessages = append(openaiMessages, toOpenAIMessage(msg)...)
+const (
+	messageRoleSystem    messageRole = "system"
+	messageRoleDeveloper messageRole = "developer"
+	messageRoleUser      messageRole = "user"
+	messageRoleAssistant messageRole = "assistant"
+	messageRoleTool      messageRole = "tool"
+)
+
+type messageType string
+
+const (
+	messageTypeMessage            messageType = "message"
+	messageTypeFunctionCall       messageType = "function_call"
+	messageTypeFunctionCallOutput messageType = "function_call_output"
+)
+
+func toOpenAIMessages(instructions string, messages []llms.Turn) []openAIMessage {
+	openAIMessages := []openAIMessage{}
+	if instructions != "" {
+		openAIMessages = append(openAIMessages, openAIMessage{
+			Role:    messageRoleDeveloper,
+			Type:    messageTypeMessage,
+			Content: instructions,
+		})
 	}
-	return openaiMessages
+	for _, msg := range messages {
+		openAIMessages = append(openAIMessages, toOpenAIMessage(msg)...)
+	}
+	return openAIMessages
 }
 
-func toOpenAIMessage(msg llms.Turn) []openAIMessage {
-	switch msg.Role {
-	case llms.MessageRoleSystem:
+func toOpenAIMessage(turn llms.Turn) []openAIMessage {
+	switch turn.Role {
+	case llms.TurnRoleUser:
 		return []openAIMessage{{
-			Type:    "message",
-			Role:    MessageRoleDeveloper,
-			Content: msg.Content,
+			Type:    messageTypeMessage,
+			Role:    messageRoleUser,
+			Content: turn.Content,
 		}}
 
-	case llms.MessageRoleUser:
-		return []openAIMessage{{
-			Type:    "message",
-			Role:    llms.MessageRoleUser,
-			Content: msg.Content,
-		}}
-
-	case llms.MessageRoleTool:
-		return []openAIMessage{{
-			Type:           "function_call_output",
-			ToolCallID:     msg.ToolCallID,
-			ToolCallOutput: msg.Content,
-		}}
-
-	case llms.MessageRoleAssistant:
-		if len(msg.ToolCalls) > 0 {
+	case llms.TurnRoleAssistant:
+		if len(turn.ToolCalls) > 0 {
 			oAIMsgs := []openAIMessage{}
-			for _, toolCall := range msg.ToolCalls {
+			for _, toolCall := range turn.ToolCalls {
 				oAIMsgs = append(oAIMsgs, openAIMessage{
-					Type:              "function_call",
+					Type:              messageTypeFunctionCall,
 					ToolCallID:        toolCall.ID,
-					ToolCallName:      toolCall.Function.Name,
-					ToolCallArguments: toolCall.Function.Arguments,
+					ToolCallName:      toolCall.Name,
+					ToolCallArguments: toolCall.Arguments,
 					ToolCallStatus:    "completed",
 				})
+				if toolCall.Response != "" {
+					oAIMsgs = append(oAIMsgs, openAIMessage{
+						Type:           messageTypeFunctionCallOutput,
+						ToolCallID:     toolCall.ID,
+						ToolCallOutput: toolCall.Response,
+					})
+				}
 			}
 			return oAIMsgs
-		} else if len(msg.Content) > 0 {
+		}
+		if len(turn.Content) > 0 {
 			return []openAIMessage{{
-				Type:    "message",
-				Role:    llms.MessageRoleAssistant,
-				Content: msg.Content,
+				Type:    messageTypeMessage,
+				Role:    messageRoleAssistant,
+				Content: turn.Content,
 			}}
 		}
 	}

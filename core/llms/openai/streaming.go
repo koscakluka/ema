@@ -29,24 +29,20 @@ func PromptWithStream(
 	systemPrompt string,
 	opts ...llms.StreamingPromptOption,
 ) *Stream {
-	options := llms.StreamingPromptOptions{}
-	if systemPrompt != "" {
-		options.BaseOptions.Messages = append(options.BaseOptions.Messages, llms.Message{
-			Role: llms.MessageRoleSystem, Content: systemPrompt,
-		})
-		options.BaseOptions.Turns = append(options.BaseOptions.Turns, llms.Turn{
-			Role: llms.MessageRoleSystem, Content: systemPrompt,
-		})
+	options := llms.StreamingPromptOptions{
+		GeneralPromptOptions: llms.GeneralPromptOptions{
+			BaseOptions: llms.BaseOptions{Instructions: systemPrompt},
+		},
 	}
 	for _, opt := range opts {
 		opt.ApplyToStreaming(&options)
 	}
 
-	messages := toOpenAIMessages(options.BaseOptions.Turns)
+	messages := toOpenAIMessages(options.BaseOptions.Instructions, options.BaseOptions.Turns)
 	if prompt != nil {
 		messages = append(messages, openAIMessage{
-			Type:    "message",
-			Role:    llms.MessageRoleUser,
+			Type:    messageTypeMessage,
+			Role:    messageRoleUser,
 			Content: *prompt,
 		})
 	}
@@ -197,8 +193,10 @@ func (s *Stream) Chunks(yield func(llms.StreamChunk, error) bool) {
 				}
 				if !yield(StreamToolCallChunk{
 					toolCall: llms.ToolCall{
-						ID:   responseBody.Item.CallID,
-						Type: "function",
+						ID:        responseBody.Item.CallID,
+						Type:      "function",
+						Name:      responseBody.Item.Name,
+						Arguments: responseBody.Item.Arguments,
 						Function: llms.ToolCallFunction{
 							Name:      responseBody.Item.Name,
 							Arguments: responseBody.Item.Arguments,

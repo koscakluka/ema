@@ -20,24 +20,16 @@ func Prompt(
 	systemPrompt string,
 	opts ...llms.GeneralPromptOption,
 ) (*llms.Message, error) {
-	options := llms.GeneralPromptOptions{}
-	if systemPrompt != "" {
-		options.BaseOptions.Messages = append(options.BaseOptions.Messages, llms.Message{
-			Role: llms.MessageRoleSystem, Content: systemPrompt,
-		})
-		options.BaseOptions.Turns = append(options.BaseOptions.Turns, llms.Turn{
-			Role: llms.MessageRoleSystem, Content: systemPrompt,
-		})
-	}
-
+	options := llms.GeneralPromptOptions{BaseOptions: llms.BaseOptions{Instructions: systemPrompt}}
 	for _, opt := range opts {
 		opt.ApplyToGeneral(&options)
 	}
 
 	messages := toOpenAIMessages(
+		options.BaseOptions.Instructions,
 		append(options.BaseOptions.Turns,
 			llms.Turn{
-				Role:    llms.MessageRoleUser,
+				Role:    llms.TurnRoleUser,
 				Content: prompt,
 			},
 		),
@@ -143,9 +135,11 @@ func Prompt(
 				return nil, fmt.Errorf("error unmarshalling output function call: %w", err)
 			}
 			response.ToolCalls = append(response.ToolCalls, llms.ToolCall{
-				ID:       outputFunctionCall.CallID,
-				Type:     "function",
-				Function: llms.ToolCallFunction{Name: outputFunctionCall.Name, Arguments: outputFunctionCall.Arguments},
+				ID:        outputFunctionCall.CallID,
+				Type:      "function",
+				Name:      outputFunctionCall.Name,
+				Arguments: outputFunctionCall.Arguments,
+				Function:  llms.ToolCallFunction{Name: outputFunctionCall.Name, Arguments: outputFunctionCall.Arguments},
 			})
 
 		case generalResponseBodyOutputTypeReasoning:

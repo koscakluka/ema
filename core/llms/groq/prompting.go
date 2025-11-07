@@ -37,23 +37,16 @@ func Prompt(
 	// Name this method to Respond, GenerateResponse or RespondTo + version
 
 	options := llms.PromptOptions{
-		Tools: slices.Clone(baseTools),
-	}
-	if systemPrompt != "" {
-		options.Messages = append(options.Messages, llms.Message{
-			Role: llms.MessageRoleSystem, Content: systemPrompt,
-		})
-		options.Turns = append(options.Turns, llms.Turn{
-			Role: llms.MessageRoleSystem, Content: systemPrompt,
-		})
+		Tools:        slices.Clone(baseTools),
+		Instructions: systemPrompt,
 	}
 	for _, opt := range opts {
 		opt(&options)
 	}
 
-	messages := toMessages(options.Turns)
+	messages := toMessages(options.Instructions, options.Turns)
 	messages = append(messages, message{
-		Role:    llms.MessageRoleUser,
+		Role:    messageRoleUser,
 		Content: prompt,
 	})
 
@@ -145,7 +138,7 @@ func Prompt(
 		}
 
 		messages = append(messages, message{
-			Role:      llms.MessageRoleAssistant,
+			Role:      messageRoleAssistant,
 			Content:   response.String(),
 			ToolCalls: toolCalls,
 		})
@@ -155,9 +148,11 @@ func Prompt(
 		}
 		for _, toolCall := range toolCalls {
 			msg.ToolCalls = append(msg.ToolCalls, llms.ToolCall{
-				ID:       toolCall.ID,
-				Type:     toolCall.Type,
-				Function: llms.ToolCallFunction{Name: toolCall.Function.Name, Arguments: toolCall.Function.Arguments},
+				ID:        toolCall.ID,
+				Type:      toolCall.Type,
+				Name:      toolCall.Function.Name,
+				Arguments: toolCall.Function.Arguments,
+				Function:  llms.ToolCallFunction{Name: toolCall.Function.Name, Arguments: toolCall.Function.Arguments},
 			})
 		}
 		responses = append(responses, msg)
@@ -176,7 +171,7 @@ func Prompt(
 					}
 					messages = append(messages, message{
 						ToolCallID: toolCall.ID,
-						Role:       llms.MessageRoleTool,
+						Role:       messageRoleTool,
 						Content:    resp,
 					})
 					responses = append(responses, llms.Message{

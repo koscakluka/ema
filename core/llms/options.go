@@ -1,11 +1,16 @@
 package llms
 
+import (
+	"slices"
+)
+
 // PromptOptions is a struct that contains all the options for a prompt. It is
 // used as a base for both general and streaming prompt options.
 //
 // Deprecated: this struct will be removed and replaced with a more specific
 // option patterns
 type PromptOptions struct {
+	Instructions    string
 	Turns           []Turn
 	Messages        []Message
 	Stream          func(string)
@@ -14,8 +19,9 @@ type PromptOptions struct {
 }
 
 type BaseOptions struct {
-	Messages []Message
-	Turns    []Turn
+	Instructions string
+	Messages     []Message
+	Turns        []Turn
 }
 
 type GeneralPromptOptions struct {
@@ -57,7 +63,9 @@ func (f PromptOption) ApplyToGeneral(o *GeneralPromptOptions) {
 	o.PromptOptions.Turns = o.BaseOptions.Turns
 	o.PromptOptions.Tools = o.Tools
 	o.PromptOptions.ForcedToolsCall = o.ForcedToolsCall
+	o.PromptOptions.Instructions = o.BaseOptions.Instructions
 	f(&o.PromptOptions)
+	o.BaseOptions.Instructions = o.PromptOptions.Instructions
 	o.BaseOptions.Messages = o.PromptOptions.Messages
 	o.BaseOptions.Turns = o.PromptOptions.Turns
 	o.Tools = o.PromptOptions.Tools
@@ -69,7 +77,9 @@ func (f PromptOption) ApplyToStreaming(o *StreamingPromptOptions) {
 	o.PromptOptions.Turns = o.GeneralPromptOptions.BaseOptions.Turns
 	o.PromptOptions.Tools = o.GeneralPromptOptions.Tools
 	o.PromptOptions.ForcedToolsCall = o.GeneralPromptOptions.ForcedToolsCall
+	o.PromptOptions.Instructions = o.BaseOptions.Instructions
 	f(&o.PromptOptions)
+	o.BaseOptions.Instructions = o.PromptOptions.Instructions
 	o.BaseOptions.Messages = o.PromptOptions.Messages
 	o.BaseOptions.Turns = o.PromptOptions.Turns
 	o.GeneralPromptOptions.Tools = o.PromptOptions.Tools
@@ -79,7 +89,9 @@ func (f PromptOption) ApplyToStreaming(o *StreamingPromptOptions) {
 func (f PromptOption) ApplyToStructured(o *StructuredPromptOptions) {
 	o.PromptOptions.Messages = o.BaseOptions.Messages
 	o.PromptOptions.Turns = o.BaseOptions.Turns
+	o.PromptOptions.Instructions = o.BaseOptions.Instructions
 	f(&o.PromptOptions)
+	o.BaseOptions.Instructions = o.PromptOptions.Instructions
 	o.BaseOptions.Messages = o.PromptOptions.Messages
 	o.BaseOptions.Turns = o.PromptOptions.Turns
 }
@@ -98,27 +110,19 @@ func WithStream(stream func(string)) PromptOption {
 // Repeating this option will overwrite the previous system prompt.
 func WithSystemPrompt(prompt string) PromptOption {
 	return func(opts *PromptOptions) {
-		if len(opts.Turns) == 0 {
+		opts.Instructions = prompt
+		if len(opts.Messages) == 0 {
 			opts.Messages = append(opts.Messages, Message{
 				Role:    MessageRoleSystem,
 				Content: prompt,
 			})
-			opts.Turns = append(opts.Turns, Turn{
-				Role:    MessageRoleSystem,
-				Content: prompt,
-			})
-		} else if opts.Turns[0].Role == MessageRoleSystem {
+		} else if opts.Messages[0].Role == MessageRoleSystem {
 			opts.Messages[0].Content = prompt
-			opts.Turns[0].Content = prompt
 		} else {
 			opts.Messages = append([]Message{{
 				Role:    MessageRoleSystem,
 				Content: prompt,
 			}}, opts.Messages...)
-			opts.Turns = append([]Turn{{
-				Role:    MessageRoleSystem,
-				Content: prompt,
-			}}, opts.Turns...)
 		}
 	}
 }
@@ -168,45 +172,123 @@ func WithForcedTools(tools ...Tool) PromptOption {
 func ToMessages(turns []Turn) []Message {
 	var messages []Message
 	for _, turn := range turns {
-		message := Message{
-			Role:       turn.Role,
-			Content:    turn.Content,
-			ToolCallID: turn.ToolCallID,
-		}
-		for _, toolCall := range turn.ToolCalls {
-			message.ToolCalls = append(message.ToolCalls, ToolCall{
-				ID:   toolCall.ID,
-				Type: toolCall.Type,
-				Function: ToolCallFunction{
-					Name:      toolCall.Function.Name,
-					Arguments: toolCall.Function.Arguments,
-				},
+		switch turn.Role {
+		case TurnRoleUser:
+			messages = append(messages, Message{
+				Role:    MessageRoleUser,
+				Content: turn.Content,
 			})
+		case TurnRoleAssistant:
+			if len(turn.ToolCalls) > 0 {
+				msg := Message{Role: MessageRoleAssistant}
+				responseMsgs := []Message{}
+				for _, toolCall := range turn.ToolCalls {
+					msg.ToolCalls = append(msg.ToolCalls, ToolCall{
+						ID:   toolCall.ID,
+						Type: toolCall.Type,
+						Function: ToolCallFunction{
+							Name:      toolCall.Name,
+							Arguments: toolCall.Arguments,
+						},
+					})
+					if toolCall.Response != "" {
+						responseMsgs = append(responseMsgs, Message{
+							Role:       MessageRoleTool,
+							Content:    toolCall.Response,
+							ToolCallID: toolCall.ID,
+						})
+					}
+				}
+				messages = append(messages, msg)
+				messages = append(messages, responseMsgs...)
+			}
+			if len(turn.Content) > 0 {
+				messages = append(messages, Message{
+					Role:    MessageRoleAssistant,
+					Content: turn.Content,
+				})
+			}
 		}
-		messages = append(messages, message)
 	}
 	return messages
 }
 
 func ToTurns(messages []Message) []Turn {
-	turns := make([]Turn, len(messages))
+	turns := []Turn{}
+	popLastTurn := func() Turn {
+		if len(turns) == 0 {
+			return Turn{}
+		}
+		turn := turns[len(turns)-1]
+		turns = turns[:len(turns)-1]
+		return turn
+	}
+
 	for _, message := range messages {
-		turn := Turn{
-			Role:       message.Role,
-			Content:    message.Content,
-			ToolCallID: message.ToolCallID,
+		turn := popLastTurn()
+		switch message.Role {
+		case MessageRoleSystem:
+			// TODO: Technically, this should save the instructions
+			// for the assistant turn, but it isn't actually implemented like
+			// that anywhere so we can just skip it
+		case MessageRoleUser:
+			if turn.Role == TurnRoleAssistant {
+				turns = append(turns, turn)
+				turn = Turn{}
+			}
+
+			turn.Role = TurnRoleUser
+			turn.Content = message.Content
+			if turn.Content != "" {
+				turns = append(turns, turn)
+			}
+		case MessageRoleAssistant:
+			if turn.Role == TurnRoleUser {
+				turns = append(turns, turn)
+				turn = Turn{}
+			}
+
+			turn.Role = TurnRoleAssistant
+			turn.Content = message.Content
+			for _, toolCall := range message.ToolCalls {
+				newToolCall := ToolCall{
+					ID:        toolCall.ID,
+					Type:      toolCall.Type,
+					Name:      toolCall.Name,
+					Arguments: toolCall.Arguments,
+					Function: ToolCallFunction{
+						Name:      toolCall.Function.Name,
+						Arguments: toolCall.Function.Arguments,
+					},
+				}
+				if newToolCall.Name == "" {
+					newToolCall.Name = newToolCall.Function.Name
+				}
+				if newToolCall.Arguments == "" {
+					newToolCall.Arguments = newToolCall.Function.Arguments
+				}
+				turn.ToolCalls = append(turn.ToolCalls, newToolCall)
+			}
+			turns = append(turns, turn)
+
+		case MessageRoleTool:
+			if turn.Role != "" {
+				turns = append(turns, turn)
+			}
+			for i, turn := range slices.Backward(turns) {
+				if turn.Role != TurnRoleAssistant {
+					continue
+				}
+				toolIdx := slices.IndexFunc(turn.ToolCalls, func(t ToolCall) bool {
+					return t.ID == message.ToolCallID
+				})
+				if toolIdx != -1 {
+					turns[i].ToolCalls[toolIdx].Response = message.Content
+					break
+				}
+			}
+
 		}
-		for _, toolCall := range message.ToolCalls {
-			turn.ToolCalls = append(turn.ToolCalls, ToolCall{
-				ID:   toolCall.ID,
-				Type: toolCall.Type,
-				Function: ToolCallFunction{
-					Name:      toolCall.Function.Name,
-					Arguments: toolCall.Function.Arguments,
-				},
-			})
-		}
-		turns = append(turns, turn)
 	}
 	return turns
 }

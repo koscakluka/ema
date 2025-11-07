@@ -15,7 +15,7 @@ func respond(t interruptionType, prompt string, o interruptions.OrchestratorV0) 
 		found := -1
 		count := 0
 		for turn := range o.Turns().RValues {
-			if turn.Role == llms.MessageRoleUser {
+			if turn.Role == llms.TurnRoleUser {
 				found = count
 				break
 			}

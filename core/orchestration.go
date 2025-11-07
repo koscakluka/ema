@@ -262,11 +262,11 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 
 			messages := o.turns
 			o.turns = append(o.turns, llms.Turn{
-				Role:    llms.MessageRoleUser,
+				Role:    llms.TurnRoleUser,
 				Content: transcript,
 			})
 
-			var response []llms.Turn
+			var response *llms.Turn
 			switch o.llm.(type) {
 			case LLMWithStream:
 				response, _ = o.processStreaming(ctx, transcript, messages)
@@ -277,7 +277,14 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				continue
 			}
 
-			o.turns = append(o.turns, response...)
+			if response == nil {
+				// TODO: Figure out how to handle this case
+				response = &llms.Turn{
+					Role: llms.TurnRoleAssistant,
+				}
+			}
+
+			o.turns = append(o.turns, *response)
 			if o.textToSpeechClient != nil {
 				if err := o.textToSpeechClient.FlushBuffer(); err != nil {
 					log.Printf("Failed to flush buffer: %v", err)
@@ -524,7 +531,7 @@ func (o *Orchestrator) Turns() emaContext.TurnsV0 {
 	return &o.turns
 }
 
-func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Turn) ([]llms.Turn, error) {
+func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Turn) (*llms.Turn, error) {
 	if o.llm.(LLMWithPrompt) == nil {
 		return nil, fmt.Errorf("LLM does not support prompting")
 	}
@@ -548,23 +555,34 @@ func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, mess
 		}),
 	)
 
-	return llms.ToTurns(response), nil
+	turns := llms.ToTurns(response)
+	if len(turns) == 0 {
+		log.Println("Warning: no turns returned for assistants turn")
+		return nil, nil
+	} else if len(turns) > 1 {
+		log.Println("Warning: multiple turns returned for assistants turn")
+	}
+	return &turns[0], nil
 }
 
-func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, turns []llms.Turn) ([]llms.Turn, error) {
+func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, originalTurns []llms.Turn) (*llms.Turn, error) {
 	if o.llm.(LLMWithStream) == nil {
 		return nil, fmt.Errorf("LLM does not support streaming")
 	}
 	llm := o.llm.(LLMWithStream)
 
 	firstRun := true
-	responses := []llms.Turn{}
+	assistantTurn := llms.Turn{Role: llms.TurnRoleAssistant}
 	for {
 		var prompt *string
+		turns := originalTurns
 		if firstRun {
 			prompt = &originalPrompt
 			firstRun = false
+		} else {
+			turns = append(turns, assistantTurn)
 		}
+
 		stream := llm.PromptWithStream(context.TODO(), prompt,
 			llms.WithTurns(turns...),
 			llms.WithTools(o.tools...),
@@ -606,42 +624,39 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 			}
 		}
 
-		responses = append(responses, llms.Turn{
-			Role:      llms.MessageRoleAssistant,
-			ToolCalls: toolCalls,
-		})
-		turns = append(turns, llms.Turn{
-			Role:      llms.MessageRoleAssistant,
-			ToolCalls: toolCalls,
-		})
 		for _, toolCall := range toolCalls {
 			response, _ := o.CallTool(ctx, toolCall)
 			if response != nil {
-				turns = append(turns, *response)
-				responses = append(responses, *response)
+				toolCall.Response = response.Content
 			}
+			assistantTurn.ToolCalls = append(assistantTurn.ToolCalls, toolCall)
 		}
 
 		if len(toolCalls) == 0 {
-			responses = append(responses, llms.Turn{
-				Role:    llms.MessageRoleAssistant,
-				Content: response.String(),
-			})
-			return responses, nil
+			assistantTurn.Content = response.String()
+			return &assistantTurn, nil
 		}
 	}
 }
 
 func (o *Orchestrator) CallTool(_ context.Context, toolCall llms.ToolCall) (*llms.Turn, error) {
+	toolName := toolCall.Name
+	toolArguments := toolCall.Arguments
+	if toolCall.Name == "" {
+		toolName = toolCall.Function.Name
+	}
+	if toolCall.Arguments == "" {
+		toolArguments = toolCall.Function.Arguments
+	}
 	for _, tool := range o.tools {
-		if tool.Function.Name == toolCall.Function.Name {
-			resp, err := tool.Execute(toolCall.Function.Arguments)
+		if tool.Function.Name == toolName {
+			resp, err := tool.Execute(toolArguments)
 			if err != nil {
 				log.Println("Error executing tool:", err)
 			}
 			return &llms.Turn{
 				ToolCallID: toolCall.ID,
-				Role:       llms.MessageRoleTool,
+				Role:       llms.TurnRoleAssistant,
 				Content:    resp,
 			}, nil
 		}

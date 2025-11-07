@@ -23,7 +23,7 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 		o.Cancel()
 		lastPrompt := -1
 		for i := range o.turns {
-			if o.turns[i].Role == llms.MessageRoleUser {
+			if o.turns[i].Role == llms.TurnRoleUser {
 				lastPrompt = i
 				break
 			}

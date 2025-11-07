@@ -23,23 +23,16 @@ func PromptJSONSchema[T any](
 	outputSchema T,
 	opts ...llms.StructuredPromptOption,
 ) (*T, error) {
-	options := llms.StructuredPromptOptions{}
-	if systemPrompt != "" {
-		options.BaseOptions.Messages = append(options.BaseOptions.Messages, llms.Message{
-			Role:    llms.MessageRoleSystem,
-			Content: systemPrompt,
-		})
-		options.BaseOptions.Turns = append(options.BaseOptions.Turns, llms.Turn{
-			Role: llms.MessageRoleSystem, Content: systemPrompt,
-		})
+	options := llms.StructuredPromptOptions{
+		BaseOptions: llms.BaseOptions{Instructions: systemPrompt},
 	}
 	for _, opt := range opts {
 		opt.ApplyToStructured(&options)
 	}
 
-	messages := toMessages(options.BaseOptions.Turns)
+	messages := toMessages(options.BaseOptions.Instructions, options.BaseOptions.Turns)
 	messages = append(messages, message{
-		Role:    llms.MessageRoleUser,
+		Role:    messageRoleUser,
 		Content: prompt,
 	})
 

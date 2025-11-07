@@ -5,11 +5,20 @@ import (
 )
 
 type message struct {
-	Role       llms.MessageRole `json:"role"`
-	Content    string           `json:"content"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
-	ToolCalls  []toolCall       `json:"tool_calls,omitempty"`
+	Role       messageRole `json:"role"`
+	Content    string      `json:"content"`
+	ToolCallID string      `json:"tool_call_id,omitempty"`
+	ToolCalls  []toolCall  `json:"tool_calls,omitempty"`
 }
+
+type messageRole string
+
+const (
+	messageRoleSystem    messageRole = "system"
+	messageRoleUser      messageRole = "user"
+	messageRoleAssistant messageRole = "assistant"
+	messageRoleTool      messageRole = "tool"
+)
 
 type toolCall struct {
 	ID       string           `json:"id"`
@@ -22,58 +31,54 @@ type toolCallFunction struct {
 	Arguments string `json:"arguments"`
 }
 
-func toMessages(messages []llms.Turn) []message {
-	var groqMessages []message
-	for _, msg := range messages {
-		groqMessages = append(groqMessages, toMessage(msg)...)
-	}
-	return groqMessages
-}
-
-func toMessage(msg llms.Turn) []message {
-	var toolCalls []toolCall
-	for _, tCall := range msg.ToolCalls {
-		toolCalls = append(toolCalls, toolCall{
-			ID:   tCall.ID,
-			Type: tCall.Type,
-			Function: toolCallFunction{
-				Name:      tCall.Function.Name,
-				Arguments: tCall.Function.Arguments,
-			},
+func toMessages(instructions string, turns []llms.Turn) []message {
+	messages := []message{}
+	if instructions != "" {
+		messages = append(messages, message{
+			Role:    messageRoleSystem,
+			Content: instructions,
 		})
 	}
-	switch msg.Role {
-	case llms.MessageRoleSystem:
-		return []message{{
-			Role:       llms.MessageRoleSystem,
-			Content:    msg.Content,
-			ToolCallID: msg.ToolCallID,
-			ToolCalls:  toolCalls,
-		}}
+	for _, turn := range turns {
+		switch turn.Role {
+		case llms.TurnRoleUser:
+			messages = append(messages, message{
+				Role:    messageRoleUser,
+				Content: turn.Content,
+			})
 
-	case llms.MessageRoleUser:
-		return []message{{
-			Role:       llms.MessageRoleUser,
-			Content:    msg.Content,
-			ToolCallID: msg.ToolCallID,
-			ToolCalls:  toolCalls,
-		}}
+		case llms.TurnRoleAssistant:
+			if len(turn.ToolCalls) > 0 {
+				msg := message{Role: messageRoleAssistant}
+				responseMsgs := []message{}
+				for _, tCall := range turn.ToolCalls {
+					msg.ToolCalls = append(msg.ToolCalls, toolCall{
+						ID:   tCall.ID,
+						Type: "function",
+						Function: toolCallFunction{
+							Name:      tCall.Name,
+							Arguments: tCall.Arguments,
+						},
+					})
+					if tCall.Response != "" {
+						responseMsgs = append(responseMsgs, message{
+							Role:       messageRoleTool,
+							Content:    tCall.Response,
+							ToolCallID: tCall.ID,
+						})
+					}
+				}
 
-	case llms.MessageRoleTool:
-		return []message{{
-			Role:       llms.MessageRoleTool,
-			Content:    msg.Content,
-			ToolCallID: msg.ToolCallID,
-			ToolCalls:  toolCalls,
-		}}
-
-	case llms.MessageRoleAssistant:
-		return []message{{
-			Role:       llms.MessageRoleAssistant,
-			Content:    msg.Content,
-			ToolCallID: msg.ToolCallID,
-			ToolCalls:  toolCalls,
-		}}
+				messages = append(messages, msg)
+				messages = append(messages, responseMsgs...)
+			}
+			if len(turn.Content) > 0 {
+				messages = append(messages, message{
+					Role:    messageRoleAssistant,
+					Content: turn.Content,
+				})
+			}
+		}
 	}
-	return []message{}
+	return messages
 }

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -27,29 +26,23 @@ func PromptWithStream(
 ) *Stream {
 	options := llms.StreamingPromptOptions{
 		GeneralPromptOptions: llms.GeneralPromptOptions{
+			BaseOptions: llms.BaseOptions{
+				Instructions: systemPrompt,
+			},
 			Tools: slices.Clone(baseTools),
 		},
-	}
-	if systemPrompt != "" {
-		options.BaseOptions.Messages = append(options.BaseOptions.Messages, llms.Message{
-			Role: llms.MessageRoleSystem, Content: systemPrompt,
-		})
-		options.BaseOptions.Turns = append(options.BaseOptions.Turns, llms.Turn{
-			Role: llms.MessageRoleSystem, Content: systemPrompt,
-		})
 	}
 	for _, opt := range opts {
 		opt.ApplyToStreaming(&options)
 	}
 
-	messages := toMessages(options.BaseOptions.Turns)
+	messages := toMessages(options.BaseOptions.Instructions, options.BaseOptions.Turns)
 	if prompt != nil {
 		messages = append(messages, message{
-			Role:    llms.MessageRoleUser,
+			Role:    messageRoleUser,
 			Content: *prompt,
 		})
 	}
-	log.Println("Messages:", messages)
 
 	var tools []Tool
 	if options.GeneralPromptOptions.Tools != nil {
@@ -154,8 +147,10 @@ func (s *Stream) Chunks(yield func(llms.StreamChunk, error) bool) {
 					if !yield(StreamToolCallChunk{
 						finishReason: finishReason,
 						toolCall: llms.ToolCall{
-							ID:   toolCall.ID,
-							Type: toolCall.Type,
+							ID:        toolCall.ID,
+							Type:      toolCall.Type,
+							Name:      toolCall.Function.Name,
+							Arguments: toolCall.Function.Arguments,
 							Function: llms.ToolCallFunction{
 								Name:      toolCall.Function.Name,
 								Arguments: toolCall.Function.Arguments,
