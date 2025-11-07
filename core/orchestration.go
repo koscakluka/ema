@@ -8,7 +8,6 @@ import (
 
 	"log"
 
-	"github.com/jinzhu/copier"
 	"github.com/koscakluka/ema/core/audio"
 	emaContext "github.com/koscakluka/ema/core/context"
 	"github.com/koscakluka/ema/core/interruptions"
@@ -404,9 +403,7 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 				return
 			}
 		} else if o.interruptionClassifier != nil {
-			var msgs []llms.Message
-			copier.Copy(&msgs, &o.turns)
-			interruption, err := o.interruptionClassifier.Classify(prompt, msgs, ClassifyWithTools(o.tools))
+			interruption, err := o.interruptionClassifier.Classify(prompt, llms.ToMessages(o.turns), ClassifyWithTools(o.tools))
 			if err != nil {
 				// TODO: Retry?
 				log.Printf("Failed to classify interruption: %v", err)
@@ -520,9 +517,7 @@ func (o *Orchestrator) StopRecording() error {
 }
 
 func (o *Orchestrator) Messages() []llms.Message {
-	var msgs []llms.Message
-	copier.Copy(msgs, o.turns)
-	return msgs
+	return llms.ToMessages(o.turns)
 }
 
 func (o *Orchestrator) Turns() emaContext.TurnsV0 {
@@ -553,21 +548,14 @@ func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, mess
 		}),
 	)
 
-	// TODO: Technically, this should return a single turn!
-	var turns []llms.Turn
-	copier.Copy(&turns, response)
-	return turns, nil
+	return llms.ToTurns(response), nil
 }
 
-func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, messages []llms.Turn) ([]llms.Turn, error) {
+func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, turns []llms.Turn) ([]llms.Turn, error) {
 	if o.llm.(LLMWithStream) == nil {
 		return nil, fmt.Errorf("LLM does not support streaming")
 	}
 	llm := o.llm.(LLMWithStream)
-	var turns []llms.Turn
-	if err := copier.Copy(&turns, messages); err != nil {
-		log.Printf("Failed to var copy messages: %v", err)
-	}
 
 	firstRun := true
 	responses := []llms.Turn{}

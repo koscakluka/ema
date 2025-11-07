@@ -1,7 +1,5 @@
 package llms
 
-import "github.com/jinzhu/copier"
-
 // PromptOptions is a struct that contains all the options for a prompt. It is
 // used as a base for both general and streaming prompt options.
 //
@@ -132,9 +130,7 @@ func WithSystemPrompt(prompt string) PromptOption {
 func WithMessages(messages ...Message) PromptOption {
 	return func(opts *PromptOptions) {
 		opts.Messages = append(opts.Messages, messages...)
-		var turns []Turn
-		copier.Copy(&turns, opts.Messages)
-		opts.Turns = append(opts.Turns, turns...)
+		opts.Turns = append(opts.Turns, ToTurns(messages)...)
 	}
 }
 
@@ -142,10 +138,8 @@ func WithMessages(messages ...Message) PromptOption {
 // Repeating this option will sequentially add more turns.
 func WithTurns(turns ...Turn) PromptOption {
 	return func(opts *PromptOptions) {
-		var msgs []Message
-		copier.Copy(&msgs, turns)
-		opts.Messages = append(opts.Messages, msgs...)
 		opts.Turns = append(opts.Turns, turns...)
+		opts.Messages = append(opts.Messages, ToMessages(turns)...)
 	}
 }
 
@@ -169,4 +163,50 @@ func WithForcedTools(tools ...Tool) PromptOption {
 	return func(opts *PromptOptions) {
 		opts.Tools = tools
 	}
+}
+
+func ToMessages(turns []Turn) []Message {
+	var messages []Message
+	for _, turn := range turns {
+		message := Message{
+			Role:       turn.Role,
+			Content:    turn.Content,
+			ToolCallID: turn.ToolCallID,
+		}
+		for _, toolCall := range turn.ToolCalls {
+			message.ToolCalls = append(message.ToolCalls, ToolCall{
+				ID:   toolCall.ID,
+				Type: toolCall.Type,
+				Function: ToolCallFunction{
+					Name:      toolCall.Function.Name,
+					Arguments: toolCall.Function.Arguments,
+				},
+			})
+		}
+		messages = append(messages, message)
+	}
+	return messages
+}
+
+func ToTurns(messages []Message) []Turn {
+	turns := make([]Turn, len(messages))
+	for _, message := range messages {
+		turn := Turn{
+			Role:       message.Role,
+			Content:    message.Content,
+			ToolCallID: message.ToolCallID,
+		}
+		for _, toolCall := range message.ToolCalls {
+			turn.ToolCalls = append(turn.ToolCalls, ToolCall{
+				ID:   toolCall.ID,
+				Type: toolCall.Type,
+				Function: ToolCallFunction{
+					Name:      toolCall.Function.Name,
+					Arguments: toolCall.Function.Arguments,
+				},
+			})
+		}
+		turns = append(turns, turn)
+	}
+	return turns
 }
