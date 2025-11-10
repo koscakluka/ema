@@ -22,6 +22,7 @@ type Orchestrator struct {
 
 	turns Turns
 
+	buffer       buffer
 	transcripts  chan string
 	promptEnded  sync.WaitGroup
 	interruption bool
@@ -47,6 +48,7 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 		transcripts: make(chan string, 10), // TODO: Figure out good valiues for this
 		config:      &Config{AlwaysRecording: true},
 		turns:       Turns{activeTurnIdx: -1},
+		buffer:      *newBuffer(),
 	}
 
 	for _, opt := range opts {
@@ -267,19 +269,57 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				Content: transcript,
 			})
 
+			o.buffer.Clear()
+			go func() {
+				for chunk := range o.buffer.Chunks {
+					activeTurn := o.turns.activeTurn()
+					if activeTurn != nil && activeTurn.Cancelled {
+						break
+					}
+					if activeTurn != nil && activeTurn.Stage != llms.TurnStageSpeaking {
+						activeTurn.Stage = llms.TurnStageSpeaking
+						o.turns.updateActiveTurn(*activeTurn)
+					}
+
+					if o.orchestrateOptions.onResponse != nil {
+						o.orchestrateOptions.onResponse(chunk)
+					}
+					if o.textToSpeechClient != nil {
+						if err := o.textToSpeechClient.SendText(chunk); err != nil {
+							log.Printf("Failed to send text to deepgram: %v", err)
+						}
+					}
+				}
+
+				if o.textToSpeechClient != nil {
+					if err := o.textToSpeechClient.FlushBuffer(); err != nil {
+						log.Printf("Failed to flush buffer: %v", err)
+					}
+				} else if o.turns.activeTurn() != nil && !o.turns.activeTurn().Cancelled {
+					o.finaliseActiveTurn()
+					o.promptEnded.Done()
+
+				}
+
+				if o.orchestrateOptions.onResponseEnd != nil {
+					o.orchestrateOptions.onResponseEnd()
+				}
+			}()
+
 			activeTurn.Stage = llms.TurnStageGeneratingResponse
 			o.turns.pushActiveTurn(*activeTurn)
 			var response *llms.Turn
 			switch o.llm.(type) {
 			case LLMWithStream:
-				response, _ = o.processStreaming(ctx, transcript, messages.turns)
+				response, _ = o.processStreaming(ctx, transcript, messages.turns, &o.buffer)
 			case LLMWithPrompt:
-				response, _ = o.processPromptOld(ctx, transcript, messages.turns)
+				response, _ = o.processPromptOld(ctx, transcript, messages.turns, &o.buffer)
 			default:
 				// Impossible state
 				continue
 			}
 
+			o.buffer.ChunksDone()
 			activeTurn = o.turns.activeTurn()
 			if activeTurn != nil && response != nil {
 				activeTurn.Role = response.Role
@@ -293,19 +333,6 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				// NOTE: Just in case it wasn't set previously
 				activeTurn.Stage = llms.TurnStageSpeaking
 				o.turns.updateActiveTurn(*activeTurn)
-			}
-			if o.textToSpeechClient != nil {
-				if err := o.textToSpeechClient.FlushBuffer(); err != nil {
-					log.Printf("Failed to flush buffer: %v", err)
-				}
-			} else if o.turns.activeTurn() != nil && !o.turns.activeTurn().Cancelled {
-				o.finaliseActiveTurn()
-				o.promptEnded.Done()
-
-			}
-
-			if o.orchestrateOptions.onResponseEnd != nil {
-				o.orchestrateOptions.onResponseEnd()
 			}
 		}
 	}()
@@ -540,7 +567,7 @@ func (o *Orchestrator) Turns() emaContext.TurnsV0 {
 	return &o.turns
 }
 
-func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Turn) (*llms.Turn, error) {
+func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Turn, buffer *buffer) (*llms.Turn, error) {
 	if o.llm.(LLMWithPrompt) == nil {
 		return nil, fmt.Errorf("LLM does not support prompting")
 	}
@@ -548,25 +575,7 @@ func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, mess
 	response, _ := o.llm.(LLMWithPrompt).Prompt(ctx, prompt,
 		llms.WithTurns(messages...),
 		llms.WithTools(o.tools...),
-		llms.WithStream(func(data string) {
-			activeTurn := o.turns.activeTurn()
-			if activeTurn != nil && activeTurn.Cancelled {
-				return
-			}
-			if activeTurn != nil && activeTurn.Stage != llms.TurnStageSpeaking {
-				activeTurn.Stage = llms.TurnStageSpeaking
-				o.turns.updateActiveTurn(*activeTurn)
-			}
-
-			if o.orchestrateOptions.onResponse != nil {
-				o.orchestrateOptions.onResponse(data)
-			}
-			if o.textToSpeechClient != nil {
-				if err := o.textToSpeechClient.SendText(data); err != nil {
-					log.Printf("Failed to send text to deepgram: %v", err)
-				}
-			}
-		}),
+		llms.WithStream(o.buffer.AddChunk),
 	)
 
 	turns := llms.ToTurns(response)
@@ -579,7 +588,7 @@ func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, mess
 	return &turns[0], nil
 }
 
-func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, originalTurns []llms.Turn) (*llms.Turn, error) {
+func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, originalTurns []llms.Turn, buffer *buffer) (*llms.Turn, error) {
 	if o.llm.(LLMWithStream) == nil {
 		return nil, fmt.Errorf("LLM does not support streaming")
 	}
@@ -628,15 +637,7 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 				chunk := chunk.(llms.StreamContentChunk)
 
 				response.WriteString(chunk.Content())
-
-				if o.orchestrateOptions.onResponse != nil {
-					o.orchestrateOptions.onResponse(chunk.Content())
-				}
-				if o.textToSpeechClient != nil {
-					if err := o.textToSpeechClient.SendText(chunk.Content()); err != nil {
-						log.Printf("Failed to send text to deepgram: %v", err)
-					}
-				}
+				o.buffer.AddChunk(chunk.Content())
 
 			case llms.StreamToolCallChunk:
 				toolCalls = append(toolCalls, chunk.(llms.StreamToolCallChunk).ToolCall())
@@ -687,11 +688,11 @@ func (o *Orchestrator) CallTool(_ context.Context, toolCall llms.ToolCall) (*llm
 func (o *Orchestrator) CallToolWithPrompt(ctx context.Context, prompt string) error {
 	switch o.llm.(type) {
 	case LLMWithStream:
-		_, err := o.processStreaming(ctx, prompt, o.turns.turns)
+		_, err := o.processStreaming(ctx, prompt, o.turns.turns, newBuffer())
 		return err
 
 	case LLMWithPrompt:
-		_, err := o.processPromptOld(ctx, prompt, o.turns.turns)
+		_, err := o.processPromptOld(ctx, prompt, o.turns.turns, newBuffer())
 		return err
 
 	default:
