@@ -13,13 +13,18 @@ type buffer struct {
 	chunksConsumed int
 	chunksDone     bool
 	chunksSignal   *sync.Cond
+
+	audio           [][]byte
+	audioConsumed   int
+	audioDone       bool
+	audioTranscript string
+	audioSignal     *sync.Cond
 }
 
 func newBuffer() *buffer {
 	return &buffer{
-		chunksConsumed: 0,
-		chunksDone:     false,
-		chunksSignal:   sync.NewCond(&sync.Mutex{}),
+		chunksSignal: sync.NewCond(&sync.Mutex{}),
+		audioSignal:  sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -54,6 +59,38 @@ func (b *buffer) Chunks(yield func(string) bool) {
 	}
 }
 
+func (b *buffer) AddAudio(audio []byte) {
+	b.audio = append(b.audio, audio)
+	b.audioSignal.Broadcast()
+}
+
+func (b *buffer) AudioDone(transcript string) {
+	b.audioDone = true
+	b.audioTranscript = transcript
+	b.audioSignal.Broadcast()
+}
+
+func (b *buffer) Audio(yield func(audio []byte) bool) {
+	for {
+		b.audioSignal.L.Lock()
+		b.audioSignal.Wait()
+		b.audioSignal.L.Unlock()
+		for {
+			if len(b.audio) == b.audioConsumed {
+				break
+			}
+			audio := b.audio[b.audioConsumed]
+			b.audioConsumed++
+			if !yield(audio) {
+				return
+			}
+		}
+		if b.audioDone && b.audioConsumed == len(b.audio) {
+			return
+		}
+	}
+}
+
 func (b *buffer) Clear() {
 	// TODO: This should probably be locked
 	b.chunks = []string{}
@@ -61,4 +98,9 @@ func (b *buffer) Clear() {
 	b.chunksDone = true
 	b.chunksSignal.Broadcast()
 	b.chunksDone = false
+	b.audio = [][]byte{}
+	b.audioConsumed = 0
+	b.audioDone = true
+	b.audioSignal.Broadcast()
+	b.audioDone = false
 }

@@ -166,44 +166,8 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 
 	if o.textToSpeechClient != nil {
 		ttsOptions := []texttospeech.TextToSpeechOption{
-			texttospeech.WithAudioCallback(func(audio []byte) {
-				if o.orchestrateOptions.onAudio != nil {
-					o.orchestrateOptions.onAudio(audio)
-				}
-
-				if o.audioOutput == nil {
-					return
-				}
-
-				if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
-					o.audioOutput.ClearBuffer()
-					return
-				}
-
-				o.audioOutput.SendAudio(audio)
-			}),
-			texttospeech.WithAudioEndedCallback(func(transcript string) {
-				defer func() {
-					o.finaliseActiveTurn()
-					o.promptEnded.Done()
-				}()
-
-				if o.orchestrateOptions.onAudioEnded != nil {
-					o.orchestrateOptions.onAudioEnded(transcript)
-				}
-
-				if o.audioOutput == nil {
-					return
-				}
-
-				if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
-					o.audioOutput.ClearBuffer()
-					return
-				}
-
-				o.audioOutput.SendAudio([]byte{})
-				o.audioOutput.AwaitMark()
-			}),
+			texttospeech.WithAudioCallback(o.buffer.AddAudio),
+			texttospeech.WithAudioEndedCallback(o.buffer.AudioDone),
 		}
 		if o.audioOutput != nil {
 			ttsOptions = append(ttsOptions, texttospeech.WithEncodingInfo(o.audioOutput.EncodingInfo()))
@@ -304,6 +268,46 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				if o.orchestrateOptions.onResponseEnd != nil {
 					o.orchestrateOptions.onResponseEnd()
 				}
+			}()
+			go func() {
+				for audio := range o.buffer.Audio {
+					if o.orchestrateOptions.onAudio != nil {
+						o.orchestrateOptions.onAudio(audio)
+					}
+
+					if o.audioOutput == nil {
+						return
+					}
+
+					if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
+						o.audioOutput.ClearBuffer()
+						return
+					}
+
+					o.audioOutput.SendAudio(audio)
+				}
+
+				defer func() {
+					o.finaliseActiveTurn()
+					o.promptEnded.Done()
+				}()
+
+				if o.orchestrateOptions.onAudioEnded != nil {
+					o.orchestrateOptions.onAudioEnded(o.buffer.audioTranscript)
+				}
+
+				if o.audioOutput == nil {
+					return
+				}
+
+				if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
+					o.audioOutput.ClearBuffer()
+					return
+				}
+
+				o.audioOutput.SendAudio([]byte{})
+				o.audioOutput.AwaitMark()
+
 			}()
 
 			activeTurn.Stage = llms.TurnStageGeneratingResponse
