@@ -23,7 +23,6 @@ type Orchestrator struct {
 	turns Turns
 
 	transcripts  chan string
-	activeTurn   *llms.Turn
 	promptEnded  sync.WaitGroup
 	interruption bool
 
@@ -47,6 +46,7 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 		IsSpeaking:  false,
 		transcripts: make(chan string, 10), // TODO: Figure out good valiues for this
 		config:      &Config{AlwaysRecording: true},
+		turns:       Turns{activeTurnIdx: -1},
 	}
 
 	for _, opt := range opts {
@@ -173,7 +173,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					return
 				}
 
-				if !o.IsSpeaking || (o.activeTurn != nil && o.activeTurn.Cancelled) {
+				if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
 					o.audioOutput.ClearBuffer()
 					return
 				}
@@ -182,7 +182,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 			}),
 			texttospeech.WithAudioEndedCallback(func(transcript string) {
 				defer func() {
-					o.activeTurn = nil
+					o.finaliseActiveTurn()
 					o.promptEnded.Done()
 				}()
 
@@ -194,7 +194,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					return
 				}
 
-				if !o.IsSpeaking || (o.activeTurn != nil && o.activeTurn.Cancelled) {
+				if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
 					o.audioOutput.ClearBuffer()
 					return
 				}
@@ -225,7 +225,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				}
 			}),
 			speechtotext.WithInterimTranscriptionCallback(func(transcript string) {
-				if o.activeTurn != nil && !o.interruption {
+				if o.turns.activeTurn() != nil && !o.interruption {
 					o.interruption = true
 				}
 
@@ -252,47 +252,58 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 
 	go func() {
 		for transcript := range o.transcripts {
-			if o.activeTurn != nil {
+			if o.turns.activeTurn() != nil {
 				o.promptEnded.Wait()
 			}
-			o.activeTurn = &llms.Turn{
-				Role: llms.TurnRoleAssistant,
+			activeTurn := &llms.Turn{
+				Role:  llms.TurnRoleAssistant,
+				Stage: llms.TurnStagePreparing,
 			}
 			o.promptEnded.Add(1)
 
 			messages := o.turns
-			o.turns = append(o.turns, llms.Turn{
+			o.turns.Push(llms.Turn{
 				Role:    llms.TurnRoleUser,
 				Content: transcript,
 			})
 
+			activeTurn.Stage = llms.TurnStageGeneratingResponse
+			o.turns.pushActiveTurn(*activeTurn)
 			var response *llms.Turn
 			switch o.llm.(type) {
 			case LLMWithStream:
-				response, _ = o.processStreaming(ctx, transcript, messages)
+				response, _ = o.processStreaming(ctx, transcript, messages.turns)
 			case LLMWithPrompt:
-				response, _ = o.processPromptOld(ctx, transcript, messages)
+				response, _ = o.processPromptOld(ctx, transcript, messages.turns)
 			default:
 				// Impossible state
 				continue
 			}
 
-			if response != nil {
-				o.activeTurn = response
+			activeTurn = o.turns.activeTurn()
+			if activeTurn != nil && response != nil {
+				activeTurn.Role = response.Role
+				activeTurn.Content = response.Content
+				activeTurn.ToolCalls = response.ToolCalls
 			} else {
 				// TODO: Figure out how to handle this case
 			}
 
-			o.turns = append(o.turns, *o.activeTurn)
+			if activeTurn != nil && !activeTurn.Cancelled {
+				// NOTE: Just in case it wasn't set previously
+				activeTurn.Stage = llms.TurnStageSpeaking
+				o.turns.updateActiveTurn(*activeTurn)
+			}
 			if o.textToSpeechClient != nil {
 				if err := o.textToSpeechClient.FlushBuffer(); err != nil {
 					log.Printf("Failed to flush buffer: %v", err)
 				}
-			} else {
-				o.activeTurn = nil
+			} else if o.turns.activeTurn() != nil && !o.turns.activeTurn().Cancelled {
+				o.finaliseActiveTurn()
 				o.promptEnded.Done()
 
 			}
+
 			if o.orchestrateOptions.onResponseEnd != nil {
 				o.orchestrateOptions.onResponseEnd()
 			}
@@ -394,21 +405,21 @@ func (o *Orchestrator) Close() {
 }
 
 func (o *Orchestrator) SendPrompt(prompt string) {
-	if o.activeTurn != nil && !o.interruption {
+	if o.turns.activeTurn() != nil && !o.interruption {
 		o.interruption = true
 	}
 
 	passthrough := &prompt
 	if o.interruption {
 		if o.interruptionHandler != nil {
-			if err := o.interruptionHandler.HandleV0(prompt, o.turns, o.tools, o); err != nil {
+			if err := o.interruptionHandler.HandleV0(prompt, o.turns.turns, o.tools, o); err != nil {
 				log.Printf("Failed to handle interruption: %v", err)
 			} else {
 				o.interruption = false
 				return
 			}
 		} else if o.interruptionClassifier != nil {
-			interruption, err := o.interruptionClassifier.Classify(prompt, llms.ToMessages(o.turns), ClassifyWithTools(o.tools))
+			interruption, err := o.interruptionClassifier.Classify(prompt, llms.ToMessages(o.turns.turns), ClassifyWithTools(o.tools))
 			if err != nil {
 				// TODO: Retry?
 				log.Printf("Failed to classify interruption: %v", err)
@@ -522,7 +533,7 @@ func (o *Orchestrator) StopRecording() error {
 }
 
 func (o *Orchestrator) Messages() []llms.Message {
-	return llms.ToMessages(o.turns)
+	return llms.ToMessages(o.turns.turns)
 }
 
 func (o *Orchestrator) Turns() emaContext.TurnsV0 {
@@ -538,8 +549,13 @@ func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, mess
 		llms.WithTurns(messages...),
 		llms.WithTools(o.tools...),
 		llms.WithStream(func(data string) {
-			if o.activeTurn != nil && o.activeTurn.Cancelled {
+			activeTurn := o.turns.activeTurn()
+			if activeTurn != nil && activeTurn.Cancelled {
 				return
+			}
+			if activeTurn != nil && activeTurn.Stage != llms.TurnStageSpeaking {
+				activeTurn.Stage = llms.TurnStageSpeaking
+				o.turns.updateActiveTurn(*activeTurn)
 			}
 
 			if o.orchestrateOptions.onResponse != nil {
@@ -594,8 +610,13 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 				break
 			}
 
-			if o.activeTurn != nil && o.activeTurn.Cancelled {
+			activeTurn := o.turns.activeTurn()
+			if activeTurn != nil && activeTurn.Cancelled {
 				return nil, nil
+			}
+			if activeTurn != nil && activeTurn.Stage != llms.TurnStageSpeaking {
+				activeTurn.Stage = llms.TurnStageSpeaking
+				o.turns.updateActiveTurn(*activeTurn)
 			}
 
 			switch chunk.(type) {
@@ -666,11 +687,11 @@ func (o *Orchestrator) CallTool(_ context.Context, toolCall llms.ToolCall) (*llm
 func (o *Orchestrator) CallToolWithPrompt(ctx context.Context, prompt string) error {
 	switch o.llm.(type) {
 	case LLMWithStream:
-		_, err := o.processStreaming(ctx, prompt, o.turns)
+		_, err := o.processStreaming(ctx, prompt, o.turns.turns)
 		return err
 
 	case LLMWithPrompt:
-		_, err := o.processPromptOld(ctx, prompt, o.turns)
+		_, err := o.processPromptOld(ctx, prompt, o.turns.turns)
 		return err
 
 	default:

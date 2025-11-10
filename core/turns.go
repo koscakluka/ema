@@ -6,37 +6,48 @@ import (
 	"github.com/koscakluka/ema/core/llms"
 )
 
-type Turns []llms.Turn
 
-// Peek returns the last turn in the stored turns
-func (t Turns) Peek() *llms.Turn {
-	return &t[len(t)-1]
+type Turns struct {
+	turns []llms.Turn
+	// TODO: Consider adding ID to turns to be able to find the active turn
+	// if needed instead of keeping track of an index
+
+	// activeTurnIdx is the index of the active turn
+	//
+	// it is an int so that active turn can be correctly modified even if the
+	// underlying slice changes
+	activeTurnIdx int
 }
 
 // Push adds a new turn to the stored turns
 func (t *Turns) Push(turn llms.Turn) {
-	*t = append(*t, turn)
+	t.turns = append(t.turns, turn)
 }
 
 // Pop removes the last turn from the stored turns, returns nil if empty
 func (t *Turns) Pop() *llms.Turn {
-	if len(*t) == 0 {
+	if len(t.turns) == 0 {
 		return nil
 	}
-	turn := (*t)[len(*t)-1]
-	*t = (*t)[:len(*t)-1]
+	lastElementIdx := len(t.turns) - 1
+	turn := t.turns[lastElementIdx]
+	t.turns = t.turns[:lastElementIdx]
+	if t.activeTurnIdx == lastElementIdx {
+		t.activeTurnIdx = -1
+	}
 	return &turn
 }
 
 // Clear removes all stored turns
 func (t *Turns) Clear() {
-	*t = (*t)[:0]
+	t.turns = nil
+	t.activeTurnIdx = -1
 }
 
 // Values is an iterator that goes over all the stored turns starting from the
 // earliest towards the latest
 func (t *Turns) Values(yield func(llms.Turn) bool) {
-	for _, turn := range *t {
+	for _, turn := range t.turns {
 		if !yield(turn) {
 			return
 		}
@@ -48,9 +59,42 @@ func (t *Turns) Values(yield func(llms.Turn) bool) {
 func (t *Turns) RValues(yield func(llms.Turn) bool) {
 	// TODO: There should be a better way to do this than creating a new
 	// method just for reversing the order
-	for _, turn := range slices.Backward(*t) {
+	for _, turn := range slices.Backward(t.turns) {
 		if !yield(turn) {
 			return
 		}
+	}
+}
+
+func (t *Turns) pushActiveTurn(turn llms.Turn) {
+	t.activeTurnIdx = len(t.turns)
+	t.turns = append(t.turns, turn)
+}
+
+func (t *Turns) activeTurn() *llms.Turn {
+	if t.activeTurnIdx < 0 || t.activeTurnIdx >= len(t.turns) {
+		return nil
+	}
+	return &t.turns[t.activeTurnIdx]
+}
+
+func (t *Turns) updateActiveTurn(turn llms.Turn) {
+	if t.activeTurnIdx < 0 || t.activeTurnIdx >= len(t.turns) {
+		return
+	}
+
+	t.turns[t.activeTurnIdx] = turn
+}
+
+func (t *Turns) unsetActiveTurn() {
+	t.activeTurnIdx = -1
+}
+
+func (o *Orchestrator) finaliseActiveTurn() {
+	activeTurn := o.turns.activeTurn()
+	if activeTurn != nil {
+		activeTurn.Stage = llms.TurnStageFinalized
+		o.turns.updateActiveTurn(*activeTurn)
+		o.turns.unsetActiveTurn()
 	}
 }

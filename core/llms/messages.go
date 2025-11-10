@@ -34,6 +34,7 @@ type Turn struct {
 	ToolCalls []ToolCall
 
 	Cancelled bool
+	Stage     TurnStage
 
 	// ToolCallID is the ID of the tool call that this turn is responding to
 	//
@@ -85,4 +86,13 @@ type TurnRole string
 const (
 	TurnRoleUser      TurnRole = "user"
 	TurnRoleAssistant TurnRole = "assistant"
+)
+
+type TurnStage string
+
+const (
+	TurnStagePreparing          TurnStage = "preparing"
+	TurnStageGeneratingResponse TurnStage = "generating_response"
+	TurnStageSpeaking           TurnStage = "speaking"
+	TurnStageFinalized          TurnStage = "finalized"
 )

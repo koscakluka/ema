@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"slices"
 
 	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema/internal/utils"
 )
 
 // respondToInterruption
@@ -21,19 +21,30 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 	switch t {
 	case InterruptionTypeContinuation:
 		o.Cancel()
-		lastPrompt := -1
-		for i := range o.turns {
-			if o.turns[i].Role == llms.TurnRoleUser {
-				lastPrompt = i
+		found := -1
+		count := 0
+		for turn := range o.Turns().RValues {
+			if turn.Role == llms.TurnRoleUser {
+				found = count
 				break
 			}
+			count++
 		}
-		if lastPrompt == -1 {
+
+		if found == -1 {
 			return &prompt, nil
 		}
-		prompt = o.turns[lastPrompt].Content + " " + prompt
-		o.turns = slices.Delete(o.turns, lastPrompt, len(o.turns))
-		return &prompt, nil
+
+		for range found {
+			o.Turns().Pop()
+		}
+
+		lastUserTurn := o.Turns().Pop()
+		if lastUserTurn != nil {
+			return utils.Ptr(lastUserTurn.Content + " " + prompt), nil
+		} else {
+			return &prompt, nil
+		}
 	case InterruptionTypeClarification:
 		o.Cancel()
 		return &prompt, nil
@@ -50,7 +61,7 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 		case LLMWithPrompt:
 			if _, err := o.llm.(LLMWithPrompt).Prompt(context.TODO(), prompt,
 				llms.WithForcedTools(o.tools...),
-				llms.WithTurns(o.turns...),
+				llms.WithTurns(o.turns.turns...),
 			); err != nil {
 				// TODO: Retry?
 				return nil, fmt.Errorf("failed to call tool LLM: %w", err)
@@ -58,7 +69,7 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 		case LLMWithGeneralPrompt:
 			resp, err := o.llm.(LLMWithGeneralPrompt).Prompt(context.TODO(), prompt,
 				llms.WithForcedTools(o.tools...),
-				llms.WithTurns(o.turns...),
+				llms.WithTurns(o.turns.turns...),
 			)
 			if err != nil {
 				// TODO: Retry?
