@@ -74,6 +74,10 @@ func (c *TextToSpeechClient) SendText(text string) error {
 		return fmt.Errorf("connection closed")
 	}
 
+	// TODO: Instead of (or in addition to) a mutex, we could implement a buffer
+	// to prevent writing to the websocket at the same time
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if err := c.wsConn.WriteJSON(struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
@@ -92,6 +96,9 @@ func (c *TextToSpeechClient) FlushBuffer() error {
 	if c.wsConn == nil {
 		return fmt.Errorf("connection closed")
 	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if err := c.wsConn.WriteJSON(struct {
 		Type string `json:"type"`
 	}{
@@ -121,6 +128,8 @@ func (c *TextToSpeechClient) ClearBuffer() error {
 
 func (c *TextToSpeechClient) CloseStream(ctx context.Context) error {
 	if c.wsConn != nil {
+		c.mu.Lock()
+		defer c.mu.Unlock()
 		if err := c.wsConn.WriteJSON(struct {
 			Type string `json:"type"`
 		}{

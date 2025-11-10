@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
@@ -13,6 +14,7 @@ type TextToSpeechClient struct {
 	transcript string
 
 	voice deepgramVoice
+	mu    sync.Mutex
 }
 
 func NewTextToSpeechClient(ctx context.Context, voice deepgramVoice) (*TextToSpeechClient, error) {
