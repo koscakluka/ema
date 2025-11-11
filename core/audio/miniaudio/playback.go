@@ -13,11 +13,11 @@ type playbackClient struct {
 	config       malgo.DeviceConfig
 
 	leftoverAudio []byte
-	awaiting      bool
-	wait          sync.WaitGroup
+	marks         []playbackMark
 
 	mu      sync.Mutex
 	audioMu sync.Mutex
+	marksMu sync.Mutex
 }
 
 func (c *playbackClient) Init(audioContext *malgo.AllocatedContext) error {
@@ -48,6 +48,25 @@ func (c *playbackClient) Init(audioContext *malgo.AllocatedContext) error {
 			for written < need {
 				var cur []byte = nil
 				if len(c.leftoverAudio) > 0 {
+					passedMarks := 0
+					for i, mark := range c.marks {
+						if mark.position >= need {
+							c.marks[i].position -= need
+						} else {
+							passedMarks++
+						}
+					}
+					if passedMarks > 0 {
+						go func() {
+							c.marksMu.Lock()
+							defer c.marksMu.Unlock()
+							toCall := c.marks[:passedMarks]
+							c.marks = c.marks[passedMarks:]
+							for _, mark := range toCall {
+								mark.callback(mark.name)
+							}
+						}()
+					}
 					if len(c.leftoverAudio) < need {
 						cur = c.leftoverAudio
 						c.audioMu.Lock()
@@ -61,11 +80,6 @@ func (c *playbackClient) Init(audioContext *malgo.AllocatedContext) error {
 					}
 				}
 				if cur == nil {
-					if c.awaiting {
-						c.wait.Done()
-						c.awaiting = false
-					}
-
 					for i := written; i < need; i++ {
 						pOutput[i] = 0
 					}
@@ -131,9 +145,21 @@ func (c *playbackClient) ClearBuffer() {
 }
 
 func (c *playbackClient) AwaitMark() error {
-	c.wait.Add(1)
-	c.awaiting = true
-	c.wait.Wait()
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go c.Mark("", func(string) { wg.Done() })
+	wg.Wait()
+	return nil
+}
+
+func (c *playbackClient) Mark(mark string, callback func(string)) error {
+	c.marksMu.Lock()
+	defer c.marksMu.Unlock()
+	c.marks = append(c.marks, playbackMark{
+		name:     mark,
+		position: len(c.leftoverAudio),
+		callback: callback,
+	})
 	return nil
 }
 
@@ -149,4 +175,10 @@ func (c *playbackClient) Uninit() error {
 	c.device = nil
 
 	return nil
+}
+
+type playbackMark struct {
+	name     string
+	position int
+	callback func(string)
 }

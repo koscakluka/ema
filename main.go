@@ -447,7 +447,7 @@ func main() {
 		orchestration.WithSpeechToTextClient(deepgramClient),
 		orchestration.WithTextToSpeechClient(deepgramSpeechClient),
 		orchestration.WithAudioInput(audioClient),
-		orchestration.WithAudioOutputV0(audioClient),
+		orchestration.WithAudioOutputV1(audioClient),
 		orchestration.WithOrchestrationTools(),
 		orchestration.WithInterruptionClassifier(
 			orchestration.NewSimpleInterruptionClassifier(structuredLlm),

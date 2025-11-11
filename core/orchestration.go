@@ -34,7 +34,7 @@ type Orchestrator struct {
 	speechToTextClient     SpeechToText
 	textToSpeechClient     TextToSpeech
 	audioInput             AudioInput
-	audioOutput            AudioOutputV0
+	audioOutput            audioOutput
 	interruptionClassifier InterruptionClassifier
 	interruptionHandlerV0  InterruptionHandlerV0
 	interruptionHandlerV1  InterruptionHandlerV1
@@ -125,6 +125,12 @@ func WithAudioOutput(client AudioOutputV0) OrchestratorOption {
 }
 
 func WithAudioOutputV0(client AudioOutputV0) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.audioOutput = client
+	}
+}
+
+func WithAudioOutputV1(client AudioOutputV1) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.audioOutput = client
 	}
@@ -308,6 +314,17 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					o.promptEnded.Done()
 				}()
 
+				o.audioOutput.SendAudio([]byte{})
+				switch o.audioOutput.(type) {
+				case AudioOutputV1:
+					wg := sync.WaitGroup{}
+					wg.Add(1)
+					o.audioOutput.(AudioOutputV1).Mark(o.buffer.audioTranscript, func(string) { wg.Done() })
+					wg.Wait()
+				case AudioOutputV0:
+					o.audioOutput.(AudioOutputV0).AwaitMark()
+				}
+
 				if o.orchestrateOptions.onAudioEnded != nil {
 					o.orchestrateOptions.onAudioEnded(o.buffer.audioTranscript)
 				}
@@ -320,9 +337,6 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					o.audioOutput.ClearBuffer()
 					return
 				}
-
-				o.audioOutput.SendAudio([]byte{})
-				o.audioOutput.AwaitMark()
 
 			}()
 
@@ -782,11 +796,20 @@ type AudioInputFine interface {
 	StopCapture() error
 }
 
-type AudioOutputV0 interface {
+type audioOutput interface {
 	EncodingInfo() audio.EncodingInfo
 	SendAudio(audio []byte) error
-	AwaitMark() error
 	ClearBuffer()
+}
+
+type AudioOutputV0 interface {
+	audioOutput
+	AwaitMark() error
+}
+
+type AudioOutputV1 interface {
+	audioOutput
+	Mark(string, func(string)) error
 }
 
 type InterruptionClassifier interface {
