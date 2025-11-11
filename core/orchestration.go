@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"log"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/core/speechtotext"
 	"github.com/koscakluka/ema/core/texttospeech"
+	"github.com/koscakluka/ema/internal/utils"
 )
 
 type Orchestrator struct {
@@ -22,10 +24,9 @@ type Orchestrator struct {
 
 	turns Turns
 
-	buffer       buffer
-	transcripts  chan string
-	promptEnded  sync.WaitGroup
-	interruption bool
+	buffer      buffer
+	transcripts chan string
+	promptEnded sync.WaitGroup
 
 	tools []llms.Tool
 
@@ -191,9 +192,8 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				}
 			}),
 			speechtotext.WithInterimTranscriptionCallback(func(transcript string) {
-				if o.turns.activeTurn() != nil && !o.interruption {
-					o.interruption = true
-				}
+				// TODO: Start generating interruption here already
+				// marking the ID will probably be required to keep track of it
 
 				if o.orchestrateOptions.onInterimTranscription != nil {
 					o.orchestrateOptions.onInterimTranscription(transcript)
@@ -436,17 +436,25 @@ func (o *Orchestrator) Close() {
 }
 
 func (o *Orchestrator) SendPrompt(prompt string) {
-	if o.turns.activeTurn() != nil && !o.interruption {
-		o.interruption = true
+	var interruptionID *int64
+	if o.turns.activeTurn() != nil {
+		interruptionID = utils.Ptr(time.Now().UnixNano())
+		interruption := &llms.Interruption{
+			ID:     *interruptionID,
+			Source: prompt,
+		}
+		o.turns.addInterruption(*interruption)
 	}
 
 	passthrough := &prompt
-	if o.interruption {
+	if interruptionID != nil {
 		if o.interruptionHandler != nil {
 			if err := o.interruptionHandler.HandleV0(prompt, o.turns.turns, o.tools, o); err != nil {
 				log.Printf("Failed to handle interruption: %v", err)
 			} else {
-				o.interruption = false
+				o.turns.updateInterruption(*interruptionID, func(interruption *llms.Interruption) {
+					interruption.Resolved = true
+				})
 				return
 			}
 		} else if o.interruptionClassifier != nil {
@@ -455,13 +463,16 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 				// TODO: Retry?
 				log.Printf("Failed to classify interruption: %v", err)
 			} else {
+				o.turns.updateInterruption(*interruptionID, func(i *llms.Interruption) { i.Type = string(interruption) })
 				passthrough, err = o.respondToInterruption(prompt, interruption)
 				if err != nil {
 					log.Printf("Failed to respond to interruption: %v", err)
 				}
 			}
 		}
-		o.interruption = false
+		o.turns.updateInterruption(*interruptionID, func(interruption *llms.Interruption) {
+			interruption.Resolved = true
+		})
 	}
 	if passthrough != nil {
 		o.queuePrompt(*passthrough)

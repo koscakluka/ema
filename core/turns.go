@@ -6,7 +6,6 @@ import (
 	"github.com/koscakluka/ema/core/llms"
 )
 
-
 type Turns struct {
 	turns []llms.Turn
 	// TODO: Consider adding ID to turns to be able to find the active turn
@@ -96,5 +95,35 @@ func (o *Orchestrator) finaliseActiveTurn() {
 		activeTurn.Stage = llms.TurnStageFinalized
 		o.turns.updateActiveTurn(*activeTurn)
 		o.turns.unsetActiveTurn()
+	}
+}
+
+func (t *Turns) addInterruption(interruption llms.Interruption) {
+	activeTurn := t.activeTurn()
+	if activeTurn != nil {
+		activeTurn.Interruptions = append(activeTurn.Interruptions, interruption)
+		t.updateActiveTurn(*activeTurn)
+	}
+}
+
+func (t *Turns) findInterruption(id int64) *llms.Interruption {
+	for turn := range t.RValues {
+		for _, interruption := range turn.Interruptions {
+			if interruption.ID == id {
+				return &interruption
+			}
+		}
+	}
+
+	return nil
+}
+
+func (t *Turns) updateInterruption(id int64, update func(*llms.Interruption)) {
+	for i, turn := range slices.Backward(t.turns) {
+		for j, interruption := range turn.Interruptions {
+			if interruption.ID == id {
+				update(&t.turns[i].Interruptions[j])
+			}
+		}
 	}
 }
