@@ -283,12 +283,12 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					}
 
 					if o.audioOutput == nil {
-						return
+						continue
 					}
 
 					if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
 						o.audioOutput.ClearBuffer()
-						return
+						continue
 					}
 
 					o.audioOutput.SendAudio(audio)
