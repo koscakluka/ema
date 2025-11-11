@@ -2,7 +2,9 @@ package llm
 
 import (
 	"context"
+	"fmt"
 
+	emaContext "github.com/koscakluka/ema/core/context"
 	"github.com/koscakluka/ema/core/interruptions"
 	"github.com/koscakluka/ema/core/llms"
 )
@@ -19,11 +21,33 @@ func NewInterruptionHandlerWithStructuredPrompt(classificationLLM LLMWithStructu
 }
 
 func (h *InterruptionHandlerWithStructuredPrompt) HandleV0(prompt string, history []llms.Turn, tools []llms.Tool, orchestrator interruptions.OrchestratorV0) error {
-	classification, err := classify(prompt, h.llm, WithHistory(history), WithTools(tools))
+	interruption := &llms.Interruption{ID: 0, Source: prompt}
+	interruption, err := classify(*interruption, h.llm, WithHistory(history), WithTools(tools))
 	if err != nil {
 		return err
 	}
-	return respond(classification, prompt, orchestrator)
+	_, err = respond(*interruption, orchestrator)
+	return err
+}
+
+func (h *InterruptionHandlerWithStructuredPrompt) HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.Interruption, error) {
+	interruption := findInterruption(id, orchestrator.Turns())
+	if interruption == nil {
+		return nil, fmt.Errorf("interruption not found")
+	}
+	interruption, err := classify(*interruption, h.llm, WithHistory(getHistory(orchestrator.Turns())), WithTools(tools))
+	if err != nil {
+		return nil, err
+	}
+	// TODO: How do we handle interruption changing in the middle of resolving it?
+	// activeInterruption := findInterruption(id, orchestrator.Turns())
+	// if activeInterruption == nil {
+	// 	return nil, fmt.Errorf("interruption not found after classification")
+	// } else if activeInterruption.Resolved {
+	// 	return nil, fmt.Errorf("interruption already resolved")
+	// }
+
+	return respond(*interruption, orchestrator)
 }
 
 type LLMWithStructuredPrompt interface {
@@ -48,11 +72,52 @@ type LLMWithGeneralPrompt interface {
 }
 
 func (h *InterruptionHandlerWithGeneralPrompt) HandleV0(prompt string, history []llms.Turn, tools []llms.Tool, orchestrator interruptions.OrchestratorV0) error {
-	classification, err := classify(prompt, h.llm)
+	interruption := &llms.Interruption{ID: 0, Source: prompt}
+	interruption, err := classify(*interruption, h.llm, WithHistory(history), WithTools(tools))
 	if err != nil {
 		return err
 	}
-	return respond(classification, prompt, nil)
+	_, err = respond(*interruption, orchestrator)
+	return err
+}
+
+func (h *InterruptionHandlerWithGeneralPrompt) HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.Interruption, error) {
+	interruption := findInterruption(id, orchestrator.Turns())
+	if interruption == nil {
+		return nil, fmt.Errorf("interruption not found")
+	}
+	interruption, err := classify(*interruption, h.llm, WithHistory(getHistory(orchestrator.Turns())), WithTools(tools))
+	if err != nil {
+		return nil, err
+	}
+	// TODO: How do we handle interruption changing in the middle of resolving it?
+	// activeInterruption := findInterruption(id, orchestrator.Turns())
+	// if activeInterruption == nil {
+	// 	return nil, fmt.Errorf("interruption not found after classification")
+	// } else if activeInterruption.Resolved {
+	// 	return nil, fmt.Errorf("interruption already resolved")
+	// }
+	return respond(*interruption, orchestrator)
 }
 
 type LLM any
+
+func findInterruption(id int64, turns emaContext.TurnsV0) *llms.Interruption {
+	for turn := range turns.RValues {
+		for _, interruption := range turn.Interruptions {
+			if interruption.ID == id {
+				return &interruption
+			}
+		}
+	}
+
+	return nil
+}
+
+func getHistory(turns emaContext.TurnsV0) []llms.Turn {
+	var history []llms.Turn
+	for turn := range turns.RValues {
+		history = append(history, turn)
+	}
+	return history
+}

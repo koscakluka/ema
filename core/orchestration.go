@@ -36,7 +36,8 @@ type Orchestrator struct {
 	audioInput             AudioInput
 	audioOutput            AudioOutput
 	interruptionClassifier InterruptionClassifier
-	interruptionHandler    InterruptionHandlerV0
+	interruptionHandlerV0  InterruptionHandlerV0
+	interruptionHandlerV1  InterruptionHandlerV1
 
 	orchestrateOptions OrchestrateOptions
 	config             *Config
@@ -145,7 +146,13 @@ func WithInterruptionClassifier(classifier InterruptionClassifier) OrchestratorO
 
 func WithInterruptionHandlerV0(handler InterruptionHandlerV0) OrchestratorOption {
 	return func(o *Orchestrator) {
-		o.interruptionHandler = handler
+		o.interruptionHandlerV0 = handler
+	}
+}
+
+func WithInterruptionHandlerV1(handler InterruptionHandlerV1) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.interruptionHandlerV1 = handler
 	}
 }
 
@@ -448,8 +455,18 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 
 	passthrough := &prompt
 	if interruptionID != nil {
-		if o.interruptionHandler != nil {
-			if err := o.interruptionHandler.HandleV0(prompt, o.turns.turns, o.tools, o); err != nil {
+		if o.interruptionHandlerV1 != nil {
+			if interruption, err := o.interruptionHandlerV1.HandleV1(*interruptionID, o, o.tools); err != nil {
+				log.Printf("Failed to handle interruption: %v", err)
+			} else {
+				o.turns.updateInterruption(*interruptionID, func(update *llms.Interruption) {
+					update.Type = interruption.Type
+					update.Resolved = interruption.Resolved
+				})
+				return
+			}
+		} else if o.interruptionHandlerV0 != nil {
+			if err := o.interruptionHandlerV0.HandleV0(prompt, o.turns.turns, o.tools, o); err != nil {
 				log.Printf("Failed to handle interruption: %v", err)
 			} else {
 				o.turns.updateInterruption(*interruptionID, func(interruption *llms.Interruption) {
@@ -769,4 +786,8 @@ type InterruptionClassifier interface {
 
 type InterruptionHandlerV0 interface {
 	HandleV0(prompt string, turns []llms.Turn, tools []llms.Tool, orchestrator interruptions.OrchestratorV0) error
+}
+
+type InterruptionHandlerV1 interface {
+	HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.Interruption, error)
 }

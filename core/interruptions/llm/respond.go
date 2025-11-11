@@ -8,8 +8,8 @@ import (
 	"github.com/koscakluka/ema/core/llms"
 )
 
-func respond(t interruptionType, prompt string, o interruptions.OrchestratorV0) error {
-	switch t {
+func respond(interruption llms.Interruption, o interruptions.OrchestratorV0) (*llms.Interruption, error) {
+	switch interruptionType(interruption.Type) {
 	case InterruptionTypeContinuation:
 		o.CancelTurn()
 		found := -1
@@ -23,7 +23,9 @@ func respond(t interruptionType, prompt string, o interruptions.OrchestratorV0) 
 		}
 
 		if found == -1 {
-			return nil
+			// TODO: Queue prompt since there is nothing to add it to
+			interruption.Resolved = true
+			return &interruption, nil
 		}
 
 		for range found {
@@ -32,34 +34,43 @@ func respond(t interruptionType, prompt string, o interruptions.OrchestratorV0) 
 
 		lastUserTurn := o.Turns().Pop()
 		if lastUserTurn != nil {
-			o.QueuePrompt(lastUserTurn.Content + " " + prompt)
+			o.QueuePrompt(lastUserTurn.Content + " " + interruption.Source)
 		} else {
-			o.QueuePrompt(prompt)
+			o.QueuePrompt(interruption.Source)
 		}
-		return nil
+		interruption.Resolved = true
+		return &interruption, nil
 
 	case InterruptionTypeClarification:
 		o.CancelTurn()
-		o.QueuePrompt(prompt)
-		return nil
+		o.QueuePrompt(interruption.Source)
+		interruption.Resolved = true
+		return &interruption, nil
 
 	case InterruptionTypeCancellation:
 		o.CancelTurn()
-		return nil
+		interruption.Resolved = true
+		return &interruption, nil
 
 	case InterruptionTypeIgnorable,
 		InterruptionTypeRepetition,
 		InterruptionTypeNoise:
-		return nil
+		interruption.Resolved = true
+		return &interruption, nil
 
 	case InterruptionTypeAction:
-		return o.CallToolWithPrompt(context.TODO(), prompt)
+		interruption.Resolved = true
+		if err := o.CallToolWithPrompt(context.TODO(), interruption.Source); err != nil {
+			return nil, err
+		}
+		return &interruption, nil
 
 	case InterruptionTypeNewPrompt:
-		o.QueuePrompt(prompt)
-		return nil
+		o.QueuePrompt(interruption.Source)
+		interruption.Resolved = true
+		return &interruption, nil
 
 	default:
-		return fmt.Errorf("unknown interruption type: %s", t)
+		return nil, fmt.Errorf("unknown interruption type: %s", interruption.Type)
 	}
 }

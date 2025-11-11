@@ -46,7 +46,7 @@ type Classification struct {
 	Type string `json:"type" jsonschema:"title=Type,description=The type of interruption" enum:"continuation,clarification,cancellation,ignorable,repetition,noise,action,new prompt"`
 }
 
-func classify(prompt string, llm LLM, opts ...ClassifyOption) (interruptionType, error) {
+func classify(interruption llms.Interruption, llm LLM, opts ...ClassifyOption) (*llms.Interruption, error) {
 	options := ClassifyOptions{}
 	for _, opt := range opts {
 		opt(&options)
@@ -60,16 +60,21 @@ func classify(prompt string, llm LLM, opts ...ClassifyOption) (interruptionType,
 		}
 
 		resp := Classification{}
-		if err := llm.(LLMWithStructuredPrompt).PromptWithStructure(context.TODO(), prompt,
+		if err := llm.(LLMWithStructuredPrompt).PromptWithStructure(context.TODO(), interruption.Source,
 			&resp,
 			llms.WithSystemPrompt(systemPrompt),
 			llms.WithTurns(options.History...),
 		); err != nil {
 			// TODO: Retry?
-			return "", err
+			return &interruption, err
 		}
 
-		return toInterruptionType(resp.Type)
+		interruptionType, err := toInterruptionType(resp.Type)
+		if err != nil {
+			return nil, err
+		}
+		interruption.Type = string(interruptionType)
+		return &interruption, nil
 
 	case LLMWithGeneralPrompt:
 		systemPrompt := interruptionClassifierSystemPrompt
@@ -77,13 +82,13 @@ func classify(prompt string, llm LLM, opts ...ClassifyOption) (interruptionType,
 			systemPrompt += fmt.Sprintf("- %s: %s", tool.Function.Name, tool.Function.Description)
 		}
 
-		response, _ := llm.(LLMWithGeneralPrompt).Prompt(context.TODO(), prompt,
+		response, _ := llm.(LLMWithGeneralPrompt).Prompt(context.TODO(), interruption.Source,
 			llms.WithSystemPrompt(systemPrompt),
 			llms.WithTurns(options.History...),
 		)
 
 		if len(response.Content) == 0 {
-			return "", fmt.Errorf("no response from interruption classifier")
+			return nil, fmt.Errorf("no response from interruption classifier")
 		}
 
 		var unmarshalledResponse struct {
@@ -91,12 +96,18 @@ func classify(prompt string, llm LLM, opts ...ClassifyOption) (interruptionType,
 		}
 		if err := json.Unmarshal([]byte(response.Content), &unmarshalledResponse); err != nil {
 			// TODO: Retry
-			return "", fmt.Errorf("failed to unmarshal interruption classification response: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal interruption classification response: %w", err)
 		}
-		return toInterruptionType(unmarshalledResponse.Classification)
+
+		interruptionType, err := toInterruptionType(unmarshalledResponse.Classification)
+		if err != nil {
+			return nil, err
+		}
+		interruption.Type = string(interruptionType)
+		return &interruption, nil
 	}
 
-	return "", fmt.Errorf("unknown llm type")
+	return nil, fmt.Errorf("unknown llm type")
 }
 
 func toInterruptionType(classification string) (interruptionType, error) {
