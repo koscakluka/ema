@@ -34,7 +34,7 @@ type Orchestrator struct {
 	speechToTextClient     SpeechToText
 	textToSpeechClient     TextToSpeech
 	audioInput             AudioInput
-	audioOutput            AudioOutput
+	audioOutput            AudioOutputV0
 	interruptionClassifier InterruptionClassifier
 	interruptionHandlerV0  InterruptionHandlerV0
 	interruptionHandlerV1  InterruptionHandlerV1
@@ -115,7 +115,16 @@ func WithAudioInput(client AudioInput) OrchestratorOption {
 	}
 }
 
-func WithAudioOutput(client AudioOutput) OrchestratorOption {
+// WithAudioOutput is a OrchestratorOption that sets the audio output client.
+//
+// Deprecated: use WithAudioOutputV0 instead, we want to free up this option
+func WithAudioOutput(client AudioOutputV0) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.audioOutput = client
+	}
+}
+
+func WithAudioOutputV0(client AudioOutputV0) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.audioOutput = client
 	}
@@ -773,7 +782,7 @@ type AudioInputFine interface {
 	StopCapture() error
 }
 
-type AudioOutput interface {
+type AudioOutputV0 interface {
 	EncodingInfo() audio.EncodingInfo
 	SendAudio(audio []byte) error
 	AwaitMark() error
