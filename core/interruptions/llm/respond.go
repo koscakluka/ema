@@ -8,7 +8,8 @@ import (
 	"github.com/koscakluka/ema/core/llms"
 )
 
-func respond(interruption llms.Interruption, o interruptions.OrchestratorV0) (*llms.Interruption, error) {
+
+func respond(interruption llms.InterruptionV0, o interruptions.OrchestratorV0) (*llms.InterruptionV0, error) {
 	switch interruptionType(interruption.Type) {
 	case InterruptionTypeContinuation:
 		o.CancelTurn()

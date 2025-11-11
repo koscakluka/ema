@@ -446,7 +446,7 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 	var interruptionID *int64
 	if o.turns.activeTurn() != nil {
 		interruptionID = utils.Ptr(time.Now().UnixNano())
-		interruption := &llms.Interruption{
+		interruption := &llms.InterruptionV0{
 			ID:     *interruptionID,
 			Source: prompt,
 		}
@@ -459,7 +459,7 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 			if interruption, err := o.interruptionHandlerV1.HandleV1(*interruptionID, o, o.tools); err != nil {
 				log.Printf("Failed to handle interruption: %v", err)
 			} else {
-				o.turns.updateInterruption(*interruptionID, func(update *llms.Interruption) {
+				o.turns.updateInterruption(*interruptionID, func(update *llms.InterruptionV0) {
 					update.Type = interruption.Type
 					update.Resolved = interruption.Resolved
 				})
@@ -469,7 +469,7 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 			if err := o.interruptionHandlerV0.HandleV0(prompt, o.turns.turns, o.tools, o); err != nil {
 				log.Printf("Failed to handle interruption: %v", err)
 			} else {
-				o.turns.updateInterruption(*interruptionID, func(interruption *llms.Interruption) {
+				o.turns.updateInterruption(*interruptionID, func(interruption *llms.InterruptionV0) {
 					interruption.Resolved = true
 				})
 				return
@@ -480,14 +480,14 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 				// TODO: Retry?
 				log.Printf("Failed to classify interruption: %v", err)
 			} else {
-				o.turns.updateInterruption(*interruptionID, func(i *llms.Interruption) { i.Type = string(interruption) })
+				o.turns.updateInterruption(*interruptionID, func(i *llms.InterruptionV0) { i.Type = string(interruption) })
 				passthrough, err = o.respondToInterruption(prompt, interruption)
 				if err != nil {
 					log.Printf("Failed to respond to interruption: %v", err)
 				}
 			}
 		}
-		o.turns.updateInterruption(*interruptionID, func(interruption *llms.Interruption) {
+		o.turns.updateInterruption(*interruptionID, func(interruption *llms.InterruptionV0) {
 			interruption.Resolved = true
 		})
 	}
@@ -789,5 +789,5 @@ type InterruptionHandlerV0 interface {
 }
 
 type InterruptionHandlerV1 interface {
-	HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.Interruption, error)
+	HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.InterruptionV0, error)
 }

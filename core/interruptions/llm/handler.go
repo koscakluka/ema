@@ -21,7 +21,7 @@ func NewInterruptionHandlerWithStructuredPrompt(classificationLLM LLMWithStructu
 }
 
 func (h *InterruptionHandlerWithStructuredPrompt) HandleV0(prompt string, history []llms.Turn, tools []llms.Tool, orchestrator interruptions.OrchestratorV0) error {
-	interruption := &llms.Interruption{ID: 0, Source: prompt}
+	interruption := &llms.InterruptionV0{ID: 0, Source: prompt}
 	interruption, err := classify(*interruption, h.llm, WithHistory(history), WithTools(tools))
 	if err != nil {
 		return err
@@ -30,7 +30,7 @@ func (h *InterruptionHandlerWithStructuredPrompt) HandleV0(prompt string, histor
 	return err
 }
 
-func (h *InterruptionHandlerWithStructuredPrompt) HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.Interruption, error) {
+func (h *InterruptionHandlerWithStructuredPrompt) HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.InterruptionV0, error) {
 	interruption := findInterruption(id, orchestrator.Turns())
 	if interruption == nil {
 		return nil, fmt.Errorf("interruption not found")
@@ -72,7 +72,7 @@ type LLMWithGeneralPrompt interface {
 }
 
 func (h *InterruptionHandlerWithGeneralPrompt) HandleV0(prompt string, history []llms.Turn, tools []llms.Tool, orchestrator interruptions.OrchestratorV0) error {
-	interruption := &llms.Interruption{ID: 0, Source: prompt}
+	interruption := &llms.InterruptionV0{ID: 0, Source: prompt}
 	interruption, err := classify(*interruption, h.llm, WithHistory(history), WithTools(tools))
 	if err != nil {
 		return err
@@ -81,7 +81,7 @@ func (h *InterruptionHandlerWithGeneralPrompt) HandleV0(prompt string, history [
 	return err
 }
 
-func (h *InterruptionHandlerWithGeneralPrompt) HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.Interruption, error) {
+func (h *InterruptionHandlerWithGeneralPrompt) HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.InterruptionV0, error) {
 	interruption := findInterruption(id, orchestrator.Turns())
 	if interruption == nil {
 		return nil, fmt.Errorf("interruption not found")
@@ -102,7 +102,7 @@ func (h *InterruptionHandlerWithGeneralPrompt) HandleV1(id int64, orchestrator i
 
 type LLM any
 
-func findInterruption(id int64, turns emaContext.TurnsV0) *llms.Interruption {
+func findInterruption(id int64, turns emaContext.TurnsV0) *llms.InterruptionV0 {
 	for turn := range turns.RValues {
 		for _, interruption := range turn.Interruptions {
 			if interruption.ID == id {

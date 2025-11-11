@@ -98,7 +98,7 @@ func (o *Orchestrator) finaliseActiveTurn() {
 	}
 }
 
-func (t *Turns) addInterruption(interruption llms.Interruption) {
+func (t *Turns) addInterruption(interruption llms.InterruptionV0) {
 	activeTurn := t.activeTurn()
 	if activeTurn != nil {
 		activeTurn.Interruptions = append(activeTurn.Interruptions, interruption)
@@ -106,7 +106,7 @@ func (t *Turns) addInterruption(interruption llms.Interruption) {
 	}
 }
 
-func (t *Turns) findInterruption(id int64) *llms.Interruption {
+func (t *Turns) findInterruption(id int64) *llms.InterruptionV0 {
 	for turn := range t.RValues {
 		for _, interruption := range turn.Interruptions {
 			if interruption.ID == id {
@@ -118,7 +118,7 @@ func (t *Turns) findInterruption(id int64) *llms.Interruption {
 	return nil
 }
 
-func (t *Turns) updateInterruption(id int64, update func(*llms.Interruption)) {
+func (t *Turns) updateInterruption(id int64, update func(*llms.InterruptionV0)) {
 	for i, turn := range slices.Backward(t.turns) {
 		for j, interruption := range turn.Interruptions {
 			if interruption.ID == id {

@@ -46,7 +46,7 @@ type Classification struct {
 	Type string `json:"type" jsonschema:"title=Type,description=The type of interruption" enum:"continuation,clarification,cancellation,ignorable,repetition,noise,action,new prompt"`
 }
 
-func classify(interruption llms.Interruption, llm LLM, opts ...ClassifyOption) (*llms.Interruption, error) {
+func classify(interruption llms.InterruptionV0, llm LLM, opts ...ClassifyOption) (*llms.InterruptionV0, error) {
 	options := ClassifyOptions{}
 	for _, opt := range opts {
 		opt(&options)

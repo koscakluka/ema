@@ -35,7 +35,7 @@ type Turn struct {
 
 	Cancelled     bool
 	Stage         TurnStage
-	Interruptions []Interruption
+	Interruptions []InterruptionV0
 
 	// ToolCallID is the ID of the tool call that this turn is responding to
 	//
@@ -44,7 +44,7 @@ type Turn struct {
 	ToolCallID string
 }
 
-type Interruption struct {
+type InterruptionV0 struct {
 	ID       int64
 	Type     string
 	Source   string
