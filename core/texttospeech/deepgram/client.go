@@ -10,8 +10,8 @@ import (
 )
 
 type TextToSpeechClient struct {
-	wsConn     *websocket.Conn
-	transcript string
+	wsConn           *websocket.Conn
+	transcriptBuffer []string
 
 	voice deepgramVoice
 	mu    sync.Mutex
