@@ -190,7 +190,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 	if o.textToSpeechClient != nil {
 		ttsOptions := []texttospeech.TextToSpeechOption{
 			texttospeech.WithAudioCallback(o.buffer.AddAudio),
-			texttospeech.WithAudioEndedCallback(o.buffer.AudioDone),
+			texttospeech.WithAudioEndedCallback(o.buffer.AudioMark),
 		}
 		if o.audioOutput != nil {
 			ttsOptions = append(ttsOptions, texttospeech.WithEncodingInfo(o.audioOutput.EncodingInfo()))
@@ -290,23 +290,36 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				if o.orchestrateOptions.onResponseEnd != nil {
 					o.orchestrateOptions.onResponseEnd()
 				}
+
 			}()
 			go func() {
-				for audio := range o.buffer.Audio {
-					if o.orchestrateOptions.onAudio != nil {
-						o.orchestrateOptions.onAudio(audio)
-					}
+				marks := ""
+				for audioOrMark := range o.buffer.Audio {
+					switch audioOrMark.Type {
+					case "audio":
+						audio := audioOrMark.Audio
+						if o.orchestrateOptions.onAudio != nil {
+							o.orchestrateOptions.onAudio(audio)
+						}
 
-					if o.audioOutput == nil {
-						continue
-					}
+						if o.audioOutput == nil {
+							continue
+						}
 
-					if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
-						o.audioOutput.ClearBuffer()
-						continue
-					}
+						if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
+							o.audioOutput.ClearBuffer()
+							continue
+						}
 
-					o.audioOutput.SendAudio(audio)
+						o.audioOutput.SendAudio(audio)
+
+					case "mark":
+						mark := audioOrMark.Mark
+						marks += mark
+						if marks == o.buffer.AllChunks() {
+							o.buffer.AudioDone(marks)
+						}
+					}
 				}
 
 				defer func() {

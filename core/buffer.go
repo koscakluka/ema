@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -19,6 +20,12 @@ type buffer struct {
 	audioDone       bool
 	audioTranscript string
 	audioSignal     *sync.Cond
+
+	audioMarks []struct {
+		name     string
+		position int
+	}
+	audioMarksConsumed int
 }
 
 func newBuffer() *buffer {
@@ -59,6 +66,10 @@ func (b *buffer) Chunks(yield func(string) bool) {
 	}
 }
 
+func (b *buffer) AllChunks() string {
+	return strings.Join(b.chunks, "")
+}
+
 func (b *buffer) AddAudio(audio []byte) {
 	b.audio = append(b.audio, audio)
 	b.audioSignal.Broadcast()
@@ -70,7 +81,7 @@ func (b *buffer) AudioDone(transcript string) {
 	b.audioSignal.Broadcast()
 }
 
-func (b *buffer) Audio(yield func(audio []byte) bool) {
+func (b *buffer) Audio(yield func(audio audioOrMark) bool) {
 	for {
 		b.audioSignal.L.Lock()
 		b.audioSignal.Wait()
@@ -81,14 +92,33 @@ func (b *buffer) Audio(yield func(audio []byte) bool) {
 			}
 			audio := b.audio[b.audioConsumed]
 			b.audioConsumed++
-			if !yield(audio) {
+			if !yield(audioOrMark{Type: "audio", Audio: audio}) {
 				return
+			}
+			for i := b.audioMarksConsumed; i < len(b.audioMarks); i++ {
+				if b.audioMarks[i].position > b.audioConsumed {
+					break
+				}
+				if !yield(audioOrMark{Type: "mark", Mark: b.audioMarks[i].name}) {
+					return
+				}
+				b.audioMarksConsumed++
 			}
 		}
 		if b.audioDone && b.audioConsumed == len(b.audio) {
 			return
 		}
 	}
+}
+
+func (b *buffer) AudioMark(name string) {
+	b.audioMarks = append(b.audioMarks, struct {
+		name     string
+		position int
+	}{
+		name:     name,
+		position: len(b.audio),
+	})
 }
 
 func (b *buffer) Clear() {
@@ -103,4 +133,15 @@ func (b *buffer) Clear() {
 	b.audioDone = true
 	b.audioSignal.Broadcast()
 	b.audioDone = false
+	b.audioMarks = []struct {
+		name     string
+		position int
+	}{}
+	b.audioMarksConsumed = 0
+}
+
+type audioOrMark struct {
+	Type  string
+	Audio []byte
+	Mark  string
 }
