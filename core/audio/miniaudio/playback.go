@@ -140,8 +140,12 @@ func (c *playbackClient) SendAudio(audio []byte) error {
 
 func (c *playbackClient) ClearBuffer() {
 	c.audioMu.Lock()
+	c.marksMu.Lock()
 	defer c.audioMu.Unlock()
+	defer c.marksMu.Unlock()
 	c.leftoverAudio = make([]byte, 0)
+	c.marks = nil
+
 }
 
 func (c *playbackClient) AwaitMark() error {
