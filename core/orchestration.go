@@ -9,9 +9,7 @@ import (
 
 	"log"
 
-	"github.com/koscakluka/ema/core/audio"
 	emaContext "github.com/koscakluka/ema/core/context"
-	"github.com/koscakluka/ema/core/interruptions"
 	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/core/speechtotext"
 	"github.com/koscakluka/ema/core/texttospeech"
@@ -57,6 +55,7 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 		opt(o)
 	}
 
+	// TODO: Remove this in a couple of releases
 	if o.interruptionClassifier == nil {
 		switch o.llm.(type) {
 		case LLMWithPrompt:
@@ -79,79 +78,10 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 	return o
 }
 
-type OrchestratorOption func(*Orchestrator)
-
-func WithStreamingLLM(client LLMWithStream) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.llm = client
-	}
-}
-
-func WithSpeechToTextClient(client SpeechToText) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.speechToTextClient = client
-	}
-}
-
-func WithTextToSpeechClient(client TextToSpeech) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.textToSpeechClient = client
-		o.IsSpeaking = true
-	}
-}
-
-func WithAudioInput(client AudioInput) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.audioInput = client
-	}
-}
-
-func WithAudioOutputV0(client AudioOutputV0) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.audioOutput = client
-		o.buffer.sampleRate = client.EncodingInfo().SampleRate
-	}
-}
-
-func WithAudioOutputV1(client AudioOutputV1) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.audioOutput = client
-		o.buffer.sampleRate = client.EncodingInfo().SampleRate
-	}
-}
-
-func WithTools(tools ...llms.Tool) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.tools = tools
-	}
-}
-
-func WithOrchestrationTools() OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.tools = append(o.tools, orchestrationTools(o)...)
-	}
-}
-
-func WithInterruptionHandlerV0(handler InterruptionHandlerV0) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.interruptionHandlerV0 = handler
-	}
-}
-
-func WithInterruptionHandlerV1(handler InterruptionHandlerV1) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.interruptionHandlerV1 = handler
-	}
-}
-
-func WithConfig(config *Config) OrchestratorOption {
-	return func(o *Orchestrator) {
-		if config == nil {
-			return
-		}
-
-		o.config = config
-	}
+func (o *Orchestrator) Close() {
+	// TODO: Make sure that deepgramClient is closed and no longer transcribing
+	// before closing the channel
+	close(o.transcripts)
 }
 
 func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOption) {
@@ -395,73 +325,6 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 	} else if o.audioInput != nil && o.speechToTextClient == nil {
 		log.Println("Warning: skip starting input audio stream: audio input set but speech to text client is not set")
 	}
-}
-
-type OrchestrateOptions struct {
-	onTranscription        func(transcript string)
-	onInterimTranscription func(transcript string)
-	onSpeakingStateChanged func(isSpeaking bool)
-	onResponse             func(response string)
-	onResponseEnd          func()
-	onCancellation         func()
-	onAudio                func(audio []byte)
-	onAudioEnded           func(transcript string)
-}
-
-type OrchestrateOption func(*OrchestrateOptions)
-
-func WithTranscriptionCallback(callback func(transcript string)) OrchestrateOption {
-	return func(o *OrchestrateOptions) {
-		o.onTranscription = callback
-	}
-}
-
-func WithInterimTranscriptionCallback(callback func(transcript string)) OrchestrateOption {
-	return func(o *OrchestrateOptions) {
-		o.onInterimTranscription = callback
-	}
-}
-
-func WithSpeakingStateChangedCallback(callback func(isSpeaking bool)) OrchestrateOption {
-	return func(o *OrchestrateOptions) {
-		o.onSpeakingStateChanged = callback
-	}
-}
-
-func WithResponseCallback(callback func(response string)) OrchestrateOption {
-	return func(o *OrchestrateOptions) {
-		o.onResponse = callback
-	}
-}
-
-func WithResponseEndCallback(callback func()) OrchestrateOption {
-	return func(o *OrchestrateOptions) {
-		o.onResponseEnd = callback
-	}
-}
-
-func WithCancellationCallback(callback func()) OrchestrateOption {
-	return func(o *OrchestrateOptions) {
-		o.onCancellation = callback
-	}
-}
-
-func WithAudioCallback(callback func(audio []byte)) OrchestrateOption {
-	return func(o *OrchestrateOptions) {
-		o.onAudio = callback
-	}
-}
-
-func WithAudioEndedCallback(callback func(transcript string)) OrchestrateOption {
-	return func(o *OrchestrateOptions) {
-		o.onAudioEnded = callback
-	}
-}
-
-func (o *Orchestrator) Close() {
-	// TODO: Make sure that deepgramClient is closed and no longer transcribing
-	// before closing the channel
-	close(o.transcripts)
 }
 
 func (o *Orchestrator) SendPrompt(prompt string) {
@@ -749,62 +612,5 @@ func (o *Orchestrator) CallToolWithPrompt(ctx context.Context, prompt string) er
 		// Impossible state technically
 		return fmt.Errorf("unknown LLM type")
 	}
-}
 
-type LLM any
-
-type LLMWithGeneralPrompt interface {
-	LLM
-	Prompt(ctx context.Context, prompt string, opts ...llms.GeneralPromptOption) (*llms.Message, error)
-}
-
-type LLMWithStream interface {
-	LLM
-	PromptWithStream(ctx context.Context, prompt *string, opts ...llms.StreamingPromptOption) llms.Stream
-}
-
-type SpeechToText interface {
-	Transcribe(ctx context.Context, opts ...speechtotext.TranscriptionOption) error
-	SendAudio(audio []byte) error
-}
-
-type TextToSpeech interface {
-	OpenStream(ctx context.Context, opts ...texttospeech.TextToSpeechOption) error
-	SendText(text string) error
-	FlushBuffer() error
-}
-
-type AudioInput interface {
-	EncodingInfo() audio.EncodingInfo
-	Stream(ctx context.Context, onAudio func(audio []byte)) error
-	Close()
-}
-
-type AudioInputFine interface {
-	StartCapture(ctx context.Context, onAudio func(audio []byte)) error
-	StopCapture() error
-}
-
-type audioOutput interface {
-	EncodingInfo() audio.EncodingInfo
-	SendAudio(audio []byte) error
-	ClearBuffer()
-}
-
-type AudioOutputV0 interface {
-	audioOutput
-	AwaitMark() error
-}
-
-type AudioOutputV1 interface {
-	audioOutput
-	Mark(string, func(string)) error
-}
-
-type InterruptionHandlerV0 interface {
-	HandleV0(prompt string, turns []llms.Turn, tools []llms.Tool, orchestrator interruptions.OrchestratorV0) error
-}
-
-type InterruptionHandlerV1 interface {
-	HandleV1(id int64, orchestrator interruptions.OrchestratorV0, tools []llms.Tool) (*llms.InterruptionV0, error)
 }
