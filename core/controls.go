@@ -10,6 +10,7 @@ func (o *Orchestrator) CancelTurn() {
 		if o.orchestrateOptions.onCancellation != nil {
 			o.orchestrateOptions.onCancellation()
 		}
+		o.UnpauseTurn()
 	}
 }
 
@@ -18,4 +19,15 @@ func (o *Orchestrator) CancelTurn() {
 // Deprecated: use CancelTurn instead
 func (o *Orchestrator) Cancel() {
 	o.CancelTurn()
+}
+
+func (o *Orchestrator) PauseTurn() {
+	if o.audioOutput != nil {
+		o.audioOutput.ClearBuffer()
+	}
+	o.buffer.PauseAudio()
+}
+
+func (o *Orchestrator) UnpauseTurn() {
+	o.buffer.UnpauseAudio()
 }

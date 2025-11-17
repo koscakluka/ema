@@ -121,18 +121,21 @@ func WithAudioInput(client AudioInput) OrchestratorOption {
 func WithAudioOutput(client AudioOutputV0) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.audioOutput = client
+		o.buffer.sampleRate = client.EncodingInfo().SampleRate
 	}
 }
 
 func WithAudioOutputV0(client AudioOutputV0) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.audioOutput = client
+		o.buffer.sampleRate = client.EncodingInfo().SampleRate
 	}
 }
 
 func WithAudioOutputV1(client AudioOutputV1) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.audioOutput = client
+		o.buffer.sampleRate = client.EncodingInfo().SampleRate
 	}
 }
 
@@ -257,10 +260,11 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 
 			o.buffer.Clear()
 			go func() {
+			textLoop:
 				for chunk := range o.buffer.Chunks {
 					activeTurn := o.turns.activeTurn()
 					if activeTurn != nil && activeTurn.Cancelled {
-						break
+						break textLoop
 					}
 					if activeTurn != nil && activeTurn.Stage != llms.TurnStageSpeaking {
 						activeTurn.Stage = llms.TurnStageSpeaking
@@ -273,6 +277,15 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					if o.textToSpeechClient != nil {
 						if err := o.textToSpeechClient.SendText(chunk); err != nil {
 							log.Printf("Failed to send text to deepgram: %v", err)
+						}
+						if o.audioOutput != nil {
+							if _, ok := o.audioOutput.(AudioOutputV1); ok {
+								if strings.ContainsAny(chunk, ".?!") {
+									if err := o.textToSpeechClient.FlushBuffer(); err != nil {
+										log.Printf("Failed to flush buffer: %v", err)
+									}
+								}
+							}
 						}
 					}
 				}
@@ -293,7 +306,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 
 			}()
 			go func() {
-				marks := ""
+			audioLoop:
 				for audioOrMark := range o.buffer.Audio {
 					switch audioOrMark.Type {
 					case "audio":
@@ -303,21 +316,32 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 						}
 
 						if o.audioOutput == nil {
-							continue
+							continue audioLoop
 						}
 
 						if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
 							o.audioOutput.ClearBuffer()
-							continue
+							break audioLoop
 						}
 
 						o.audioOutput.SendAudio(audio)
 
 					case "mark":
 						mark := audioOrMark.Mark
-						marks += mark
-						if marks == o.buffer.AllChunks() {
-							o.buffer.AudioDone(marks)
+						if o.audioOutput != nil {
+							switch o.audioOutput.(type) {
+							case AudioOutputV1:
+								o.audioOutput.(AudioOutputV1).Mark(mark, func(mark string) {
+									o.buffer.MarkPlayed(mark)
+								})
+							case AudioOutputV0:
+								go func() {
+									o.audioOutput.(AudioOutputV0).AwaitMark()
+									o.buffer.MarkPlayed(mark)
+								}()
+							}
+						} else {
+							o.buffer.MarkPlayed(mark)
 						}
 					}
 				}
@@ -327,17 +351,6 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 					o.promptEnded.Done()
 				}()
 
-				o.audioOutput.SendAudio([]byte{})
-				switch o.audioOutput.(type) {
-				case AudioOutputV1:
-					wg := sync.WaitGroup{}
-					wg.Add(1)
-					o.audioOutput.(AudioOutputV1).Mark(o.buffer.audioTranscript, func(string) { wg.Done() })
-					wg.Wait()
-				case AudioOutputV0:
-					o.audioOutput.(AudioOutputV0).AwaitMark()
-				}
-
 				if o.orchestrateOptions.onAudioEnded != nil {
 					o.orchestrateOptions.onAudioEnded(o.buffer.audioTranscript)
 				}
@@ -345,6 +358,9 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				if o.audioOutput == nil {
 					return
 				}
+
+				// TODO: Figure out why this is needed
+				// o.audioOutput.SendAudio([]byte{})
 
 				if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
 					o.audioOutput.ClearBuffer()
@@ -643,7 +659,7 @@ func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, mess
 	response, _ := o.llm.(LLMWithPrompt).Prompt(ctx, prompt,
 		llms.WithTurns(messages...),
 		llms.WithTools(o.tools...),
-		llms.WithStream(o.buffer.AddChunk),
+		llms.WithStream(buffer.AddChunk),
 	)
 
 	turns := llms.ToTurns(response)
@@ -705,7 +721,7 @@ func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt stri
 				chunk := chunk.(llms.StreamContentChunk)
 
 				response.WriteString(chunk.Content())
-				o.buffer.AddChunk(chunk.Content())
+				buffer.AddChunk(chunk.Content())
 
 			case llms.StreamToolCallChunk:
 				toolCalls = append(toolCalls, chunk.(llms.StreamToolCallChunk).ToolCall())
