@@ -14,13 +14,6 @@ func (o *Orchestrator) CancelTurn() {
 	}
 }
 
-// Cancel is an alias for CancelTurn
-//
-// Deprecated: use CancelTurn instead
-func (o *Orchestrator) Cancel() {
-	o.CancelTurn()
-}
-
 func (o *Orchestrator) PauseTurn() {
 	if o.audioOutput != nil {
 		o.audioOutput.ClearBuffer()

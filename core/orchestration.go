@@ -81,15 +81,6 @@ func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 
 type OrchestratorOption func(*Orchestrator)
 
-// WithLLM sets the LLM client for the orchestrator.
-//
-// Deprecated: use WithStreamingLLM instead
-func WithLLM(client LLMWithPrompt) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.llm = client
-	}
-}
-
 func WithStreamingLLM(client LLMWithStream) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.llm = client
@@ -112,16 +103,6 @@ func WithTextToSpeechClient(client TextToSpeech) OrchestratorOption {
 func WithAudioInput(client AudioInput) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.audioInput = client
-	}
-}
-
-// WithAudioOutput is a OrchestratorOption that sets the audio output client.
-//
-// Deprecated: use WithAudioOutputV0 instead, we want to free up this option
-func WithAudioOutput(client AudioOutputV0) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.audioOutput = client
-		o.buffer.sampleRate = client.EncodingInfo().SampleRate
 	}
 }
 
@@ -148,17 +129,6 @@ func WithTools(tools ...llms.Tool) OrchestratorOption {
 func WithOrchestrationTools() OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.tools = append(o.tools, orchestrationTools(o)...)
-	}
-}
-
-// WithInterruptionClassifier sets the interruption classifier that is used
-// internally to classify interruptions types so orchestrator can respond to
-// them.
-//
-// Deprecated: use WithInterruptionHandler instead
-func WithInterruptionClassifier(classifier InterruptionClassifier) OrchestratorOption {
-	return func(o *Orchestrator) {
-		o.interruptionClassifier = classifier
 	}
 }
 
@@ -643,10 +613,6 @@ func (o *Orchestrator) StopRecording() error {
 	return nil
 }
 
-func (o *Orchestrator) Messages() []llms.Message {
-	return llms.ToMessages(o.turns.turns)
-}
-
 func (o *Orchestrator) Turns() emaContext.TurnsV0 {
 	return &o.turns
 }
@@ -787,12 +753,6 @@ func (o *Orchestrator) CallToolWithPrompt(ctx context.Context, prompt string) er
 
 type LLM any
 
-// Deprecated: use LLMWithGeneralPrompt instead
-type LLMWithPrompt interface {
-	LLM
-	Prompt(ctx context.Context, prompt string, opts ...llms.PromptOption) ([]llms.Message, error)
-}
-
 type LLMWithGeneralPrompt interface {
 	LLM
 	Prompt(ctx context.Context, prompt string, opts ...llms.GeneralPromptOption) (*llms.Message, error)
@@ -839,10 +799,6 @@ type AudioOutputV0 interface {
 type AudioOutputV1 interface {
 	audioOutput
 	Mark(string, func(string)) error
-}
-
-type InterruptionClassifier interface {
-	Classify(prompt string, history []llms.Message, opts ...ClassifyOption) (interruptionType, error)
 }
 
 type InterruptionHandlerV0 interface {

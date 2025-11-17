@@ -10,9 +10,68 @@ import (
 	"github.com/koscakluka/ema/internal/utils"
 )
 
+// WithLLM sets the LLM client for the orchestrator.
+//
+// Deprecated: (since v0.0.13) use WithStreamingLLM instead
+func WithLLM(client LLMWithPrompt) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.llm = client
+	}
+}
+
+// LLMWithPrompt
+//
+// Deprecated: (since v0.0.13) use LLMWithGeneralPrompt instead
+type LLMWithPrompt interface {
+	LLM
+	Prompt(ctx context.Context, prompt string, opts ...llms.PromptOption) ([]llms.Message, error)
+}
+
+// WithInterruptionClassifier sets the interruption classifier that is used
+// internally to classify interruptions types so orchestrator can respond to
+// them.
+//
+// Deprecated: (since v0.0.13) use WithInterruptionHandler instead
+func WithInterruptionClassifier(classifier InterruptionClassifier) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.interruptionClassifier = classifier
+	}
+}
+
+// InterruptionClassifier
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
+type InterruptionClassifier interface {
+	Classify(prompt string, history []llms.Message, opts ...ClassifyOption) (interruptionType, error)
+}
+
+// WithAudioOutput is a OrchestratorOption that sets the audio output client.
+//
+// Deprecated: (since v0.0.13) use WithAudioOutputV0 instead, we want to free up this option
+func WithAudioOutput(client AudioOutputV0) OrchestratorOption {
+	return func(o *Orchestrator) {
+		o.audioOutput = client
+		o.buffer.sampleRate = client.EncodingInfo().SampleRate
+	}
+}
+
+// Cancel is an alias for CancelTurn
+//
+// Deprecated: (since v0.0.13) use CancelTurn instead
+func (o *Orchestrator) Cancel() {
+	o.CancelTurn()
+}
+
+// Messages return old style llm messages
+//
+// Deprecated: (since v0.0.13) use Turns instead
+func (o *Orchestrator) Messages() []llms.Message {
+	return llms.ToMessages(o.turns.turns)
+}
+
 // respondToInterruption
 //
-// Deprecated: Use the InterruptionHandler interface instead of relaying on this
+// Deprecated: (since v0.0.13) Use the InterruptionHandler interface instead of relaying on this
 func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) (passthrough *string, err error) {
 	// TODO: Take this out of the orchestrator and into a separate interuption
 	// handler
@@ -94,6 +153,9 @@ func (o *Orchestrator) respondToInterruption(prompt string, t interruptionType) 
 	}
 }
 
+// SimpleInterruptionClassifier
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 type SimpleInterruptionClassifier struct {
 	llm   LLM
 	tools []llms.Tool
@@ -102,7 +164,7 @@ type SimpleInterruptionClassifier struct {
 // NewSimpleInterruptionClassifier creates a new SimpleInterruptionClassifier
 // used to classify the type of interruption a prompt is.
 //
-// Deprecated: use InterruptionHandlers instead
+// Deprecated:  (since v0.0.13) use InterruptionHandlers instead
 func NewSimpleInterruptionClassifier(llm LLMWithPrompt, opts ...InterruptionClassifierOption) *SimpleInterruptionClassifier {
 	classifier := &SimpleInterruptionClassifier{
 		llm: llm,
@@ -113,20 +175,32 @@ func NewSimpleInterruptionClassifier(llm LLMWithPrompt, opts ...InterruptionClas
 	return classifier
 }
 
+// InterruptionClassifierOption
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 type InterruptionClassifierOption func(*SimpleInterruptionClassifier)
 
+// ClassifierWithTools
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 func ClassifierWithTools(tools []llms.Tool) InterruptionClassifierOption {
 	return func(c *SimpleInterruptionClassifier) {
 		c.tools = tools
 	}
 }
 
+// ClassifierWithInterruptionLLM
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 func ClassifierWithInterruptionLLM(llm InterruptionLLM) InterruptionClassifierOption {
 	return func(c *SimpleInterruptionClassifier) {
 		c.llm = llm
 	}
 }
 
+// ClassifierWithGeneralPromptLLM
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 func ClassifierWithGeneralPromptLLM(llm LLMWithGeneralPrompt) InterruptionClassifierOption {
 	return func(c *SimpleInterruptionClassifier) {
 		c.llm = llm
@@ -134,6 +208,9 @@ func ClassifierWithGeneralPromptLLM(llm LLMWithGeneralPrompt) InterruptionClassi
 }
 
 const (
+	// interruptionClassifierSystemPrompt
+	//
+	// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 	interruptionClassifierSystemPrompt = `You are a helpful assistant that can classify a prompt type of interruption to the conversation.
 
 A conversation interruption can be classified as one of the following:
@@ -150,6 +227,9 @@ Only respond with the classification of the interruption as JSON: {"classificati
 
 Accessible tools:
 `
+	// interruptionClassifierStructuredSystemPrompt
+	//
+	// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 	interruptionClassifierStructuredSystemPrompt = `You are a helpful assistant that can classify a prompt type of interruption to the conversation.
 
 A conversation interruption can be classified as one of the following:
@@ -166,10 +246,16 @@ Accessible tools:
 `
 )
 
+// Classification
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 type Classification struct {
 	Type string `json:"type" jsonschema:"title=Type,description=The type of interruption" enum:"continuation,clarification,cancellation,ignorable,repetition,noise,action,new prompt"`
 }
 
+// Classify
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 func (c SimpleInterruptionClassifier) Classify(prompt string, history []llms.Message, opts ...ClassifyOption) (interruptionType, error) {
 	options := ClassifyOptions{}
 	for _, opt := range opts {
@@ -270,18 +356,30 @@ func (c SimpleInterruptionClassifier) Classify(prompt string, history []llms.Mes
 	}
 }
 
+// ClassifyOption
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 type ClassifyOption func(*ClassifyOptions)
 
+// ClassifyOptions
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 type ClassifyOptions struct {
 	Tools []llms.Tool
 }
 
+// ClassifyWithTools
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 func ClassifyWithTools(tools []llms.Tool) ClassifyOption {
 	return func(o *ClassifyOptions) {
 		o.Tools = tools
 	}
 }
 
+// interruptionType
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 type interruptionType string
 
 const (
@@ -295,6 +393,9 @@ const (
 	InterruptionTypeNewPrompt     interruptionType = "new prompt"
 )
 
+// InterruptionLLM
+//
+// Deprecated: (since v0.0.13) use InterruptionHandlers instead
 type InterruptionLLM interface {
 	PromptWithStructure(ctx context.Context, prompt string, outputSchema any, opts ...llms.StructuredPromptOption) error
 }
