@@ -205,69 +205,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				}
 
 			}()
-			go func() {
-			audioLoop:
-				for audioOrMark := range o.buffer.Audio {
-					switch audioOrMark.Type {
-					case "audio":
-						audio := audioOrMark.Audio
-						if o.orchestrateOptions.onAudio != nil {
-							o.orchestrateOptions.onAudio(audio)
-						}
-
-						if o.audioOutput == nil {
-							continue audioLoop
-						}
-
-						if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
-							o.audioOutput.ClearBuffer()
-							break audioLoop
-						}
-
-						o.audioOutput.SendAudio(audio)
-
-					case "mark":
-						mark := audioOrMark.Mark
-						if o.audioOutput != nil {
-							switch o.audioOutput.(type) {
-							case AudioOutputV1:
-								o.audioOutput.(AudioOutputV1).Mark(mark, func(mark string) {
-									o.buffer.MarkPlayed(mark)
-								})
-							case AudioOutputV0:
-								go func() {
-									o.audioOutput.(AudioOutputV0).AwaitMark()
-									o.buffer.MarkPlayed(mark)
-								}()
-							}
-						} else {
-							o.buffer.MarkPlayed(mark)
-						}
-					}
-				}
-
-				defer func() {
-					o.finaliseActiveTurn()
-					o.promptEnded.Done()
-				}()
-
-				if o.orchestrateOptions.onAudioEnded != nil {
-					o.orchestrateOptions.onAudioEnded(o.buffer.audioTranscript)
-				}
-
-				if o.audioOutput == nil {
-					return
-				}
-
-				// TODO: Figure out why this is needed
-				// o.audioOutput.SendAudio([]byte{})
-
-				if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
-					o.audioOutput.ClearBuffer()
-					return
-				}
-
-			}()
+			go o.passSpeechToAudioOutput()
 
 			activeTurn.Stage = llms.TurnStageGeneratingResponse
 			o.turns.pushActiveTurn(*activeTurn)
@@ -300,31 +238,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 		}
 	}()
 
-	if o.audioInput != nil && o.speechToTextClient != nil {
-		go func() {
-			if fineAudioInput, ok := o.audioInput.(AudioInputFine); ok {
-				if o.config.AlwaysRecording {
-					if err := fineAudioInput.StartCapture(ctx, func(audio []byte) {
-						if err := o.SendAudio(audio); err != nil {
-							log.Printf("Failed to send audio to speech to text client: %v", err)
-						}
-					}); err != nil {
-						log.Printf("Failed to start audio input streaming: %v", err)
-					}
-				}
-			} else {
-				if err := o.audioInput.Stream(ctx, func(audio []byte) {
-					if err := o.SendAudio(audio); err != nil {
-						log.Printf("Failed to send audio to speech to text client: %v", err)
-					}
-				}); err != nil {
-					log.Printf("Failed to start audio input streaming: %v", err)
-				}
-			}
-		}()
-	} else if o.audioInput != nil && o.speechToTextClient == nil {
-		log.Println("Warning: skip starting input audio stream: audio input set but speech to text client is not set")
-	}
+	o.initAudioInput()
 }
 
 func (o *Orchestrator) SendPrompt(prompt string) {
@@ -382,16 +296,7 @@ func (o *Orchestrator) SendPrompt(prompt string) {
 }
 
 func (o *Orchestrator) SendAudio(audio []byte) error {
-	if o.speechToTextClient == nil {
-		log.Println("Warning: SendAudio called but speech to text client is not set")
-		return nil
-	}
-
-	if o.IsRecording || o.config.AlwaysRecording {
-		return o.speechToTextClient.SendAudio(audio)
-	}
-
-	return nil
+	return o.sendAudio(audio)
 }
 
 // QueuePrompt immediately queues the prompt for processing after the current
@@ -423,19 +328,14 @@ func (o *Orchestrator) SetAlwaysRecording(isAlwaysRecording bool) {
 	o.config.AlwaysRecording = isAlwaysRecording
 
 	if isAlwaysRecording {
-		if fineAudioInput, ok := o.audioInput.(AudioInputFine); ok {
-			if err := fineAudioInput.StartCapture(
-				context.TODO(),
-				func(audio []byte) { o.SendAudio(audio) },
-			); err != nil {
+		go func() {
+			if err := o.startCapture(); err != nil {
 				log.Printf("Failed to start audio input: %v", err)
 			}
-		}
+		}()
 	} else if !o.IsRecording {
-		if fineAudioInput, ok := o.audioInput.(AudioInputFine); ok {
-			if err := fineAudioInput.StopCapture(); err != nil {
-				log.Printf("Failed to stop audio input: %v", err)
-			}
+		if err := o.stopCapture(); err != nil {
+			log.Printf("Failed to stop audio input: %v", err)
 		}
 	}
 }
@@ -447,17 +347,7 @@ func (o *Orchestrator) StartRecording() error {
 		return nil
 	}
 
-	if fineAudioInput, ok := o.audioInput.(AudioInputFine); ok {
-		if err := fineAudioInput.StartCapture(
-			context.TODO(),
-			func(audio []byte) { o.SendAudio(audio) },
-		); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	return nil
+	return o.startCapture()
 }
 
 func (o *Orchestrator) StopRecording() error {
@@ -466,14 +356,7 @@ func (o *Orchestrator) StopRecording() error {
 		return nil
 	}
 
-	if fineAudioInput, ok := o.audioInput.(AudioInputFine); ok {
-		if err := fineAudioInput.StopCapture(); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	return nil
+	return o.stopCapture()
 }
 
 func (o *Orchestrator) Turns() emaContext.TurnsV0 {
