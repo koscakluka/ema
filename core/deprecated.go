@@ -51,7 +51,7 @@ type InterruptionClassifier interface {
 func WithAudioOutput(client AudioOutputV0) OrchestratorOption {
 	return func(o *Orchestrator) {
 		o.audioOutput = client
-		o.buffer.sampleRate = client.EncodingInfo().SampleRate
+		o.outputAudioBuffer.sampleRate = client.EncodingInfo().SampleRate
 	}
 }
 

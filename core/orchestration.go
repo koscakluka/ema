@@ -12,7 +12,6 @@ import (
 	emaContext "github.com/koscakluka/ema/core/context"
 	"github.com/koscakluka/ema/core/llms"
 	"github.com/koscakluka/ema/core/speechtotext"
-	"github.com/koscakluka/ema/core/texttospeech"
 	"github.com/koscakluka/ema/internal/utils"
 )
 
@@ -22,9 +21,10 @@ type Orchestrator struct {
 
 	turns Turns
 
-	buffer      buffer
-	transcripts chan string
-	promptEnded sync.WaitGroup
+	outputTextBuffer  textBuffer
+	outputAudioBuffer audioBuffer
+	transcripts       chan string
+	promptEnded       sync.WaitGroup
 
 	tools []llms.Tool
 
@@ -43,12 +43,13 @@ type Orchestrator struct {
 
 func NewOrchestrator(opts ...OrchestratorOption) *Orchestrator {
 	o := &Orchestrator{
-		IsRecording: false,
-		IsSpeaking:  false,
-		transcripts: make(chan string, 10), // TODO: Figure out good valiues for this
-		config:      &Config{AlwaysRecording: true},
-		turns:       Turns{activeTurnIdx: -1},
-		buffer:      *newBuffer(),
+		IsRecording:       false,
+		IsSpeaking:        false,
+		transcripts:       make(chan string, 10), // TODO: Figure out good valiues for this
+		config:            &Config{AlwaysRecording: true},
+		turns:             Turns{activeTurnIdx: -1},
+		outputTextBuffer:  *newTextBuffer(),
+		outputAudioBuffer: *newAudioBuffer(),
 	}
 
 	for _, opt := range opts {
@@ -90,19 +91,7 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 		opt(&o.orchestrateOptions)
 	}
 
-	if o.textToSpeechClient != nil {
-		ttsOptions := []texttospeech.TextToSpeechOption{
-			texttospeech.WithAudioCallback(o.buffer.AddAudio),
-			texttospeech.WithAudioEndedCallback(o.buffer.AudioMark),
-		}
-		if o.audioOutput != nil {
-			ttsOptions = append(ttsOptions, texttospeech.WithEncodingInfo(o.audioOutput.EncodingInfo()))
-		}
-
-		if err := o.textToSpeechClient.OpenStream(context.TODO(), ttsOptions...); err != nil {
-			log.Printf("Failed to open deepgram speech stream: %v", err)
-		}
-	}
+	o.initTTS()
 
 	if o.speechToTextClient != nil {
 		sttOptions := []speechtotext.TranscriptionOption{
@@ -158,53 +147,9 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 				Content: transcript,
 			})
 
-			o.buffer.Clear()
-			go func() {
-			textLoop:
-				for chunk := range o.buffer.Chunks {
-					activeTurn := o.turns.activeTurn()
-					if activeTurn != nil && activeTurn.Cancelled {
-						break textLoop
-					}
-					if activeTurn != nil && activeTurn.Stage != llms.TurnStageSpeaking {
-						activeTurn.Stage = llms.TurnStageSpeaking
-						o.turns.updateActiveTurn(*activeTurn)
-					}
-
-					if o.orchestrateOptions.onResponse != nil {
-						o.orchestrateOptions.onResponse(chunk)
-					}
-					if o.textToSpeechClient != nil {
-						if err := o.textToSpeechClient.SendText(chunk); err != nil {
-							log.Printf("Failed to send text to deepgram: %v", err)
-						}
-						if o.audioOutput != nil {
-							if _, ok := o.audioOutput.(AudioOutputV1); ok {
-								if strings.ContainsAny(chunk, ".?!") {
-									if err := o.textToSpeechClient.FlushBuffer(); err != nil {
-										log.Printf("Failed to flush buffer: %v", err)
-									}
-								}
-							}
-						}
-					}
-				}
-
-				if o.textToSpeechClient != nil {
-					if err := o.textToSpeechClient.FlushBuffer(); err != nil {
-						log.Printf("Failed to flush buffer: %v", err)
-					}
-				} else if o.turns.activeTurn() != nil && !o.turns.activeTurn().Cancelled {
-					o.finaliseActiveTurn()
-					o.promptEnded.Done()
-
-				}
-
-				if o.orchestrateOptions.onResponseEnd != nil {
-					o.orchestrateOptions.onResponseEnd()
-				}
-
-			}()
+			o.outputTextBuffer.Clear()
+			o.outputAudioBuffer.Clear()
+			go o.passTextToTTS()
 			go o.passSpeechToAudioOutput()
 
 			activeTurn.Stage = llms.TurnStageGeneratingResponse
@@ -212,15 +157,16 @@ func (o *Orchestrator) Orchestrate(ctx context.Context, opts ...OrchestrateOptio
 			var response *llms.Turn
 			switch o.llm.(type) {
 			case LLMWithStream:
-				response, _ = o.processStreaming(ctx, transcript, messages.turns, &o.buffer)
+				response, _ = o.processStreaming(ctx, transcript, messages.turns, &o.outputTextBuffer)
 			case LLMWithPrompt:
-				response, _ = o.processPromptOld(ctx, transcript, messages.turns, &o.buffer)
+				response, _ = o.processPromptOld(ctx, transcript, messages.turns, &o.outputTextBuffer)
 			default:
 				// Impossible state
 				continue
 			}
 
-			o.buffer.ChunksDone()
+			o.outputTextBuffer.ChunksDone()
+			o.outputAudioBuffer.ChunksDone()
 			activeTurn = o.turns.activeTurn()
 			if activeTurn != nil && response != nil {
 				activeTurn.Role = response.Role
@@ -363,7 +309,7 @@ func (o *Orchestrator) Turns() emaContext.TurnsV0 {
 	return &o.turns
 }
 
-func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Turn, buffer *buffer) (*llms.Turn, error) {
+func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, messages []llms.Turn, buffer *textBuffer) (*llms.Turn, error) {
 	if o.llm.(LLMWithPrompt) == nil {
 		return nil, fmt.Errorf("LLM does not support prompting")
 	}
@@ -384,7 +330,7 @@ func (o *Orchestrator) processPromptOld(ctx context.Context, prompt string, mess
 	return &turns[0], nil
 }
 
-func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, originalTurns []llms.Turn, buffer *buffer) (*llms.Turn, error) {
+func (o *Orchestrator) processStreaming(ctx context.Context, originalPrompt string, originalTurns []llms.Turn, buffer *textBuffer) (*llms.Turn, error) {
 	if o.llm.(LLMWithStream) == nil {
 		return nil, fmt.Errorf("LLM does not support streaming")
 	}
@@ -463,6 +409,7 @@ func (o *Orchestrator) CallTool(_ context.Context, toolCall llms.ToolCall) (*llm
 	}
 	if toolCall.Arguments == "" {
 		toolArguments = toolCall.Function.Arguments
+
 	}
 	for _, tool := range o.tools {
 		if tool.Function.Name == toolName {
@@ -484,11 +431,11 @@ func (o *Orchestrator) CallTool(_ context.Context, toolCall llms.ToolCall) (*llm
 func (o *Orchestrator) CallToolWithPrompt(ctx context.Context, prompt string) error {
 	switch o.llm.(type) {
 	case LLMWithStream:
-		_, err := o.processStreaming(ctx, prompt, o.turns.turns, newBuffer())
+		_, err := o.processStreaming(ctx, prompt, o.turns.turns, newTextBuffer())
 		return err
 
 	case LLMWithPrompt:
-		_, err := o.processPromptOld(ctx, prompt, o.turns.turns, newBuffer())
+		_, err := o.processPromptOld(ctx, prompt, o.turns.turns, newTextBuffer())
 		return err
 
 	default:

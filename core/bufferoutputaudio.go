@@ -1,10 +1,93 @@
 package orchestration
 
 import (
-	"strings"
+	"context"
+	"log"
 	"sync"
 	"time"
+
+	"github.com/koscakluka/ema/core/texttospeech"
 )
+
+func (o *Orchestrator) initTTS() {
+	if o.textToSpeechClient != nil {
+		ttsOptions := []texttospeech.TextToSpeechOption{
+			texttospeech.WithAudioCallback(o.outputAudioBuffer.AddAudio),
+			texttospeech.WithAudioEndedCallback(o.outputAudioBuffer.AudioMark),
+		}
+		if o.audioOutput != nil {
+			ttsOptions = append(ttsOptions, texttospeech.WithEncodingInfo(o.audioOutput.EncodingInfo()))
+		}
+
+		if err := o.textToSpeechClient.OpenStream(context.TODO(), ttsOptions...); err != nil {
+			log.Printf("Failed to open deepgram speech stream: %v", err)
+		}
+	}
+}
+
+func (o *Orchestrator) passSpeechToAudioOutput() {
+bufferReadingLoop:
+	for audioOrMark := range o.outputAudioBuffer.Audio {
+		switch audioOrMark.Type {
+		case "audio":
+			audio := audioOrMark.Audio
+			if o.orchestrateOptions.onAudio != nil {
+				o.orchestrateOptions.onAudio(audio)
+			}
+
+			if o.audioOutput == nil {
+				continue bufferReadingLoop
+			}
+
+			if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
+				o.audioOutput.ClearBuffer()
+				break bufferReadingLoop
+			}
+
+			o.audioOutput.SendAudio(audio)
+
+		case "mark":
+			mark := audioOrMark.Mark
+			if o.audioOutput != nil {
+				switch o.audioOutput.(type) {
+				case AudioOutputV1:
+					o.audioOutput.(AudioOutputV1).Mark(mark, func(mark string) {
+						o.outputAudioBuffer.MarkPlayed(mark)
+					})
+				case AudioOutputV0:
+					go func() {
+						o.audioOutput.(AudioOutputV0).AwaitMark()
+						o.outputAudioBuffer.MarkPlayed(mark)
+					}()
+				}
+			} else {
+				o.outputAudioBuffer.MarkPlayed(mark)
+			}
+		}
+	}
+
+	defer func() {
+		o.finaliseActiveTurn()
+		o.promptEnded.Done()
+	}()
+
+	if o.orchestrateOptions.onAudioEnded != nil {
+		o.orchestrateOptions.onAudioEnded(o.outputAudioBuffer.audioTranscript)
+	}
+
+	if o.audioOutput == nil {
+		return
+	}
+
+	// TODO: Figure out why this is needed
+	// o.audioOutput.SendAudio([]byte{})
+
+	if !o.IsSpeaking || (o.turns.activeTurn() != nil && o.turns.activeTurn().Cancelled) {
+		o.audioOutput.ClearBuffer()
+		return
+	}
+
+}
 
 // TODO: Calculate the error factor based on marks' timestamps
 const errorFactor = 0.5
@@ -13,13 +96,11 @@ const errorFactor = 0.5
 // to a slice when we already consumed a part of it. But it needs to be synced
 // properly, probably a ring buffer makes sense.
 
-type buffer struct {
+type audioBuffer struct {
 	sampleRate int
 
-	chunks              []string
-	chunksConsumed      int
-	chunksDone          bool
-	chunksSignal        *sync.Cond
+	chunksDone bool
+
 	audio               [][]byte
 	audioConsumed       int
 	audioPlayed         int
@@ -38,56 +119,20 @@ type buffer struct {
 	pausedSignal *sync.Cond
 }
 
-func newBuffer() *buffer {
-	return &buffer{
-		chunksSignal: sync.NewCond(&sync.Mutex{}),
+func newAudioBuffer() *audioBuffer {
+	return &audioBuffer{
 		audioSignal:  sync.NewCond(&sync.Mutex{}),
 		pausedSignal: sync.NewCond(&sync.Mutex{}),
 		sampleRate:   1,
 	}
 }
 
-func (b *buffer) AddChunk(chunk string) {
-	b.chunks = append(b.chunks, chunk)
-	b.chunksSignal.Broadcast()
-}
-
-func (b *buffer) ChunksDone() {
-	b.chunksDone = true
-	b.chunksSignal.Broadcast()
-}
-
-func (b *buffer) Chunks(yield func(string) bool) {
-	for {
-		for {
-			if len(b.chunks) == b.chunksConsumed {
-				break
-			}
-			chunk := b.chunks[b.chunksConsumed]
-			b.chunksConsumed++
-			if !yield(chunk) {
-				return
-			}
-		}
-		if b.chunksDone && b.chunksConsumed == len(b.chunks) {
-			return
-		}
-		b.chunksSignal.L.Lock()
-		b.chunksSignal.Wait()
-		b.chunksSignal.L.Unlock()
-	}
-}
-
-func (b *buffer) AllChunks() string {
-	return strings.Join(b.chunks, "")
-}
-
-func (b *buffer) AddAudio(audio []byte) {
+func (b *audioBuffer) AddAudio(audio []byte) {
 	b.audio = append(b.audio, audio)
 	b.audioSignal.Broadcast()
 }
 
-func (b *buffer) Audio(yield func(audio audioOrMark) bool) {
+func (b *audioBuffer) Audio(yield func(audio audioOrMark) bool) {
 	for {
 		for {
 			if len(b.audio) == b.audioConsumed {
@@ -132,7 +177,7 @@ func (b *buffer) Audio(yield func(audio audioOrMark) bool) {
 	}
 }
 
-func (b *buffer) AudioMark(name string) {
+func (b *audioBuffer) AudioMark(name string) {
 	b.audioMarks = append(b.audioMarks, struct {
 		name     string
 		position int
@@ -143,16 +188,16 @@ func (b *buffer) AudioMark(name string) {
 	b.audioSignal.Broadcast()
 }
 
-func (b *buffer) MarkPlayed(name string) {
+func (b *audioBuffer) MarkPlayed(name string) {
 	for _, mark := range b.audioMarks {
 		if mark.name == name {
 			// "duration", audioDuration(b.audio[b.audioPlayed:mark.position], b.sampleRate),
 			// "actual_duration", time.Since(b.audioPlayingStarted),
+			b.audioTranscript += name
 			b.audioPlayed = mark.position
 			b.audioPlayingStarted = time.Now()
 			if b.chunksDone && b.audioPlayed == len(b.audio) {
 				b.audioDone = true
-				b.audioTranscript = b.AllChunks()
 				b.audioSignal.Broadcast()
 			}
 			break
@@ -160,7 +205,11 @@ func (b *buffer) MarkPlayed(name string) {
 	}
 }
 
-func (b *buffer) PauseAudio() {
+func (b *audioBuffer) ChunksDone() {
+	b.chunksDone = true
+}
+
+func (b *audioBuffer) PauseAudio() {
 	if b.audioDone {
 		return
 	}
@@ -194,21 +243,17 @@ func (b *buffer) PauseAudio() {
 	b.pausedSignal.Broadcast()
 }
 
-func (b *buffer) UnpauseAudio() {
+func (b *audioBuffer) UnpauseAudio() {
 	b.paused = false
 	b.audioPlayingStarted = time.Time{}
 	b.pausedSignal.Broadcast()
 	b.audioSignal.Broadcast()
 }
 
-func (b *buffer) Clear() {
+func (b *audioBuffer) Clear() {
 	// TODO: This should probably be locked
-	b.paused = false
-	b.chunks = []string{}
-	b.chunksConsumed = 0
 	b.chunksDone = true
-	b.chunksSignal.Broadcast()
-	b.chunksDone = false
+	b.paused = false
 	b.audio = [][]byte{}
 	b.audioConsumed = 0
 	b.audioDone = true
