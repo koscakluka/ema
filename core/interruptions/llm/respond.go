@@ -61,7 +61,7 @@ func respond(interruption llms.InterruptionV0, o interruptions.OrchestratorV0) (
 
 	case InterruptionTypeAction:
 		interruption.Resolved = true
-		if err := o.CallToolWithPrompt(context.TODO(), interruption.Source); err != nil {
+		if err := o.CallTool(context.TODO(), interruption.Source); err != nil {
 			return nil, err
 		}
 		return &interruption, nil
