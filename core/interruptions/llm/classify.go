@@ -2,45 +2,18 @@ package llm
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
 	"github.com/koscakluka/ema/core/llms"
 )
 
-const (
-	interruptionClassifierSystemPrompt = `You are a helpful assistant that can classify a prompt type of interruption to the conversation.
+//go:embed classifierInstr.tmpl
+var interruptionClassifierSystemPrompt string
 
-A conversation interruption can be classified as one of the following:
-- continuation: The interruption is a continuation of the previous sentence/request (e.g. "Tell me about Star Wars.", "Ships design").
-- cancellation: Anything that indicates that the response should not be finished. Only used if the interruption cannot be addressed by a listed tool.
-- clarification: The interruption is a clarification or restatement of the previous instruction (e.g. "It's actually about the TV show, not the movie").
-- ignorable: The interruption is ignorable and should not be responded to.
-- repetition: The interruption is a repetition of the previous sentence/request.
-- noise: The interruption is noise and should be ignored.
-- action: The interruption is a addressable with a listed tool.
-- new prompt: The interruption is a new prompt to be responded to that could not be understood as a continuation of the previous sentence
-
-Only respond with the classification of the interruption as JSON: {"classification": "response"}
-
-Accessible tools:
-`
-
-	interruptionClassifierStructuredSystemPrompt = `You are a helpful assistant that can classify a prompt type of interruption to the conversation.
-
-A conversation interruption can be classified as one of the following:
-- continuation: The interruption is a continuation of the previous sentence/request (e.g. "Tell me about Star Wars.", "Ships design").
-- cancellation: Anything that indicates that the response should not be finished. Only used if the interruption cannot be addressed by a listed tool.
-- clarification: The interruption is a clarification or restatement of the previous instruction (e.g. "It's actually about the TV show, not the movie").
-- ignorable: The interruption is ignorable and should not be responded to.
-- repetition: The interruption is a repetition of the previous sentence/request.
-- noise: The interruption is noise and should be ignored.
-- action: The interruption is a addressable with a listed tool.
-- new prompt: The interruption is a new prompt to be responded to that could not be understood as a continuation of the previous sentence
-
-Accessible tools:
-`
-)
+//go:embed classifierSturctInsttr.tmpl
+var interruptionClassifierStructuredSystemPrompt string
 
 type Classification struct {
 	Type string `json:"type" jsonschema:"title=Type,description=The type of interruption" enum:"continuation,clarification,cancellation,ignorable,repetition,noise,action,new prompt"`
