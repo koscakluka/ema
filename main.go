@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"reflect"
 	"slices"
 
 	"os"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/koscakluka/ema/core"
 	"github.com/koscakluka/ema/core/audio/miniaudio"
+	llmInterruptionsHandler "github.com/koscakluka/ema/core/interruptions/llm"
 	"github.com/koscakluka/ema/core/llms/groq"
 	deepgramstt "github.com/koscakluka/ema/core/speechtotext/deepgram"
 	deepgramt2s "github.com/koscakluka/ema/core/texttospeech/deepgram"
@@ -438,9 +438,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create structured groq client: %v", err)
 	}
-	if !reflect.TypeOf(structuredLlm).Implements(reflect.TypeOf((*orchestration.InterruptionLLM)(nil)).Elem()) {
-		log.Fatalf("Structured groq client does not implement the interruption llm interface")
-	}
 
 	orchestrator := orchestration.NewOrchestrator(
 		orchestration.WithStreamingLLM(llm),
@@ -449,8 +446,8 @@ func main() {
 		orchestration.WithAudioInput(audioClient),
 		orchestration.WithAudioOutputV1(audioClient),
 		orchestration.WithOrchestrationTools(),
-		orchestration.WithInterruptionClassifier(
-			orchestration.NewSimpleInterruptionClassifier(structuredLlm),
+		orchestration.WithInterruptionHandlerV1(
+			llmInterruptionsHandler.NewInterruptionHandlerWithStructuredPrompt(structuredLlm),
 		),
 		orchestration.WithConfig(&orchestration.Config{AlwaysRecording: false}),
 	)
