@@ -10,6 +10,20 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [v0.0.13] - 2025-11-20
+
+### Added
+
 - `core/WithInterruptionHandlerV0` option and `core/InterruptionHandlerV0`
   interface for `core/Orchestrator` with accompanying logic to use it instead of
   the built-in interruption handling mechanisms
@@ -76,8 +90,6 @@ Versioning](https://semver.org/spec/v2.0.0.html).
   `core/llms/ToolCall`
 - `core/llms/ToolCall.Type` field
 
-### Removed
-
 ### Fixed
 
 - `core/texttospeech/deepgram/` panicking when concurrently calling `SendText`
@@ -85,9 +97,8 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 - `core/texttospeech/deepgram/` dropping text sent after `FlushBuffer` call or
   returned confirmation
 
-### Security
-
 ## [v0.0.12] - 2025-11-05
 
-[unreleased]: https://github.com/koscakluka/ema/compare/v0.0.12...HEAD
+[unreleased]: https://github.com/koscakluka/ema/compare/v0.0.13...HEAD
+[v0.0.13]: https://github.com/koscakluka/ema/compare/v0.0.12...v0.0.13
 [v0.0.12]: https://github.com/koscakluka/ema/compare/v0.0.11...v0.0.12
