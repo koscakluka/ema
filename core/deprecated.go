@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/koscakluka/ema/core/llms"
-	"github.com/koscakluka/ema/internal/utils"
+	"github.com/koscakluka/ema-core/core/llms"
+	"github.com/koscakluka/ema-core/internal/utils"
 )
 
 // WithLLM sets the LLM client for the orchestrator.

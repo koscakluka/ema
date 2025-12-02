@@ -1,6 +1,6 @@
 package context
 
-import "github.com/koscakluka/ema/core/llms"
+import "github.com/koscakluka/ema-core/core/llms"
 
 type TurnsV0 interface {
 	Push(turn llms.Turn)

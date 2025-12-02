@@ -1,6 +1,6 @@
 package texttospeech
 
-import "github.com/koscakluka/ema/core/audio"
+import "github.com/koscakluka/ema-core/core/audio"
 
 type TextToSpeechOptions struct {
 	AudioCallback func(audio []byte)

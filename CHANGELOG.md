@@ -99,6 +99,6 @@ Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [v0.0.12] - 2025-11-05
 
-[unreleased]: https://github.com/koscakluka/ema/compare/v0.0.13...HEAD
-[v0.0.13]: https://github.com/koscakluka/ema/compare/v0.0.12...v0.0.13
-[v0.0.12]: https://github.com/koscakluka/ema/compare/v0.0.11...v0.0.12
+[unreleased]: https://github.com/koscakluka/ema-core/compare/v0.0.13...HEAD
+[v0.0.13]: https://github.com/koscakluka/ema-core/compare/v0.0.12...v0.0.13
+[v0.0.12]: https://github.com/koscakluka/ema-core/compare/v0.0.11...v0.0.12

@@ -1,6 +1,6 @@
 package speechtotext
 
-import "github.com/koscakluka/ema/core/audio"
+import "github.com/koscakluka/ema-core/core/audio"
 
 type TranscriptionOptions struct {
 	PartialInterimTranscriptionCallback func(transcript string)

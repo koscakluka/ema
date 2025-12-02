@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema-core/core/llms"
 )
 
 const (

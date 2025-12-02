@@ -3,7 +3,7 @@ package interruptions
 import (
 	"context"
 
-	emaContext "github.com/koscakluka/ema/core/context"
+	emaContext "github.com/koscakluka/ema-core/core/context"
 )
 
 type OrchestratorV0 interface {

@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/koscakluka/ema/core/interruptions"
-	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema-core/core/interruptions"
+	"github.com/koscakluka/ema-core/core/llms"
 )
-
 
 func respond(interruption llms.InterruptionV0, o interruptions.OrchestratorV0) (*llms.InterruptionV0, error) {
 	switch interruptionType(interruption.Type) {

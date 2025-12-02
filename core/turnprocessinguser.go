@@ -5,9 +5,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/koscakluka/ema/core/llms"
-	"github.com/koscakluka/ema/core/speechtotext"
-	"github.com/koscakluka/ema/internal/utils"
+	"github.com/koscakluka/ema-core/core/llms"
+	"github.com/koscakluka/ema-core/core/speechtotext"
+	"github.com/koscakluka/ema-core/internal/utils"
 )
 
 func (o *Orchestrator) initSST() {

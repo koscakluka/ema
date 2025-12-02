@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/invopop/jsonschema"
-	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema-core/core/llms"
 )
 
 func PromptJSONSchema[T any](

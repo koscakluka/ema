@@ -3,11 +3,11 @@ package orchestration
 import (
 	"context"
 
-	"github.com/koscakluka/ema/core/audio"
-	"github.com/koscakluka/ema/core/interruptions"
-	"github.com/koscakluka/ema/core/llms"
-	"github.com/koscakluka/ema/core/speechtotext"
-	"github.com/koscakluka/ema/core/texttospeech"
+	"github.com/koscakluka/ema-core/core/audio"
+	"github.com/koscakluka/ema-core/core/interruptions"
+	"github.com/koscakluka/ema-core/core/llms"
+	"github.com/koscakluka/ema-core/core/speechtotext"
+	"github.com/koscakluka/ema-core/core/texttospeech"
 )
 
 type OrchestratorOption func(*Orchestrator)

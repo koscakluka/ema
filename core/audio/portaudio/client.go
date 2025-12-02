@@ -7,7 +7,7 @@ import (
 	"log"
 
 	"github.com/gordonklaus/portaudio"
-	"github.com/koscakluka/ema/core/audio"
+	"github.com/koscakluka/ema-core/core/audio"
 )
 
 const (

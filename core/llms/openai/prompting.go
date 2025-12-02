@@ -8,8 +8,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/koscakluka/ema/core/llms"
-	"github.com/koscakluka/ema/internal/utils"
+	"github.com/koscakluka/ema-core/core/llms"
+	"github.com/koscakluka/ema-core/internal/utils"
 )
 
 func Prompt(

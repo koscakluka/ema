@@ -1,7 +1,7 @@
 package orchestration
 
 import (
-	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema-core/core/llms"
 )
 
 func orchestrationTools(o *Orchestrator) []llms.Tool {

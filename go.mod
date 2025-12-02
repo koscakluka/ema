@@ -1,4 +1,4 @@
-module github.com/koscakluka/ema
+module github.com/koscakluka/ema-core
 
 go 1.24.4
 

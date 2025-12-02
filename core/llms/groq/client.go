@@ -6,7 +6,7 @@ import (
 	"os"
 	"slices"
 
-	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema-core/core/llms"
 )
 
 const (

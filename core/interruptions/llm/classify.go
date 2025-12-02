@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema-core/core/llms"
 )
 
 //go:embed classifierInstr.tmpl

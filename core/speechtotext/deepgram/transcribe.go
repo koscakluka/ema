@@ -14,9 +14,9 @@ import (
 
 	api "github.com/deepgram/deepgram-go-sdk/pkg/api/listen/v1/websocket/interfaces"
 	"github.com/gorilla/websocket"
-	"github.com/koscakluka/ema/core/audio"
-	"github.com/koscakluka/ema/core/speechtotext"
-	"github.com/koscakluka/ema/internal/utils"
+	"github.com/koscakluka/ema-core/core/audio"
+	"github.com/koscakluka/ema-core/core/speechtotext"
+	"github.com/koscakluka/ema-core/internal/utils"
 )
 
 const (

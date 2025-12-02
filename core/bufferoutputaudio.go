@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koscakluka/ema/core/texttospeech"
+	"github.com/koscakluka/ema-core/core/texttospeech"
 )
 
 func (o *Orchestrator) initTTS() {

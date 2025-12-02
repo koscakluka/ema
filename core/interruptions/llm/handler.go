@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	emaContext "github.com/koscakluka/ema/core/context"
-	"github.com/koscakluka/ema/core/interruptions"
-	"github.com/koscakluka/ema/core/llms"
+	emaContext "github.com/koscakluka/ema-core/core/context"
+	"github.com/koscakluka/ema-core/core/interruptions"
+	"github.com/koscakluka/ema-core/core/llms"
 )
 
 type InterruptionHandlerWithStructuredPrompt struct {

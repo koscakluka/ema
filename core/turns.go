@@ -3,7 +3,7 @@ package orchestration
 import (
 	"slices"
 
-	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema-core/core/llms"
 )
 
 type Turns struct {

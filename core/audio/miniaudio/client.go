@@ -6,7 +6,7 @@ import (
 	"log"
 
 	"github.com/gen2brain/malgo"
-	"github.com/koscakluka/ema/core/audio"
+	"github.com/koscakluka/ema-core/core/audio"
 )
 
 const sampleRate = 48000

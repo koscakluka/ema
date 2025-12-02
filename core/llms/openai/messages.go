@@ -1,6 +1,6 @@
 package openai
 
-import "github.com/koscakluka/ema/core/llms"
+import "github.com/koscakluka/ema-core/core/llms"
 
 type openAIMessage struct {
 	Type messageType `json:"type"`

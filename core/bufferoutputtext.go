@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema-core/core/llms"
 )
 
 func (o *Orchestrator) passTextToTTS() {

@@ -2,7 +2,7 @@ package openai
 
 import (
 	"github.com/jinzhu/copier"
-	"github.com/koscakluka/ema/core/llms"
+	"github.com/koscakluka/ema-core/core/llms"
 )
 
 type openAITool struct {

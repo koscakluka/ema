@@ -11,8 +11,8 @@ import (
 	"strconv"
 
 	"github.com/gorilla/websocket"
-	"github.com/koscakluka/ema/core/audio"
-	"github.com/koscakluka/ema/core/texttospeech"
+	"github.com/koscakluka/ema-core/core/audio"
+	"github.com/koscakluka/ema-core/core/texttospeech"
 )
 
 const (
